@@ -28,10 +28,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt pytest httpx ruff
+          # main first: requirements.txt is then already met, so a release that
+          # PyPI has not published yet (or not everywhere yet) is not needed
           if [ "${{ matrix.easydetect }}" = main ]; then
             pip install "easydetect[train] @ git+https://github.com/themakerrobot/easydetect@main"
           fi
+          pip install -r requirements.txt pytest httpx ruff
           python -c "import easydetect; print('easydetect', easydetect.__version__)"
       - name: Lint
         run: ruff check .

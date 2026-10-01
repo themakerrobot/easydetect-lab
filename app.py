@@ -277,7 +277,7 @@ def _file_entry(image: Path, images_root: Path) -> dict:
         labelled = True
     except FileNotFoundError:
         boxes, labelled = 0, False
-    return {"name": str(image.relative_to(images_root)), "labelled": labelled, "boxes": boxes}
+    return {"name": image.relative_to(images_root).as_posix(), "labelled": labelled, "boxes": boxes}
 
 
 @app.get("/api/datasets/{dataset_id}/image/{index}")
@@ -352,11 +352,11 @@ def dataset_stats(dataset_id: int):
     for image in images:
         label = label_path(image)
         if not label.exists():
-            unlabelled.append(str(image.relative_to(images_root)))
+            unlabelled.append(image.relative_to(images_root).as_posix())
             continue
         rows = read_labels(label)
         if not rows:
-            empty.append(str(image.relative_to(images_root)))
+            empty.append(image.relative_to(images_root).as_posix())
         for row in rows:
             boxes += 1
             if row["cls"] in per_class:
@@ -1547,7 +1547,7 @@ def _combine(sources: list[dict], name: str) -> dict:
 
 def _write_data_yaml(root: Path, images_root: Path, names: list[str]) -> Path:
     path = root / "data.yaml"
-    split = images_root.relative_to(root) if images_root != root else "."
+    split = images_root.relative_to(root).as_posix() if images_root != root else "."
     path.write_text(
         yaml.safe_dump(
             {

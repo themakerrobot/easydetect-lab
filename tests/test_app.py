@@ -7,6 +7,7 @@ import importlib
 import io
 import json
 import os
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -1120,7 +1121,8 @@ def test_a_certificate_is_made_once_and_reused(tmp_path):
     parsed = x509.load_pem_x509_certificate(stamp)
     names = parsed.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert "localhost" in names.get_values_for_type(x509.DNSName)
-    assert oct(key.stat().st_mode)[-3:] == "600"
+    if sys.platform != "win32":                  # Windows has no POSIX file modes
+        assert oct(key.stat().st_mode)[-3:] == "600"
 
 
 def test_auto_labelling_drafts_with_the_datasets_own_run(studio):
@@ -1144,6 +1146,11 @@ def test_auto_labelling_drafts_with_the_datasets_own_run(studio):
     assert client.get(f"/api/jobs/{queued}").json()["dataset"] == "set"
 
 
+#: The fake nvidia-smi below is a shell script found through a POSIX PATH.
+posix_only = pytest.mark.skipif(sys.platform == "win32",
+                                reason="the fake nvidia-smi is a sh script")
+
+
 def _fake_smi(folder, lines):
     script = folder / "nvidia-smi"
     body = "\n".join(f"echo '{line}'" for line in lines)
@@ -1152,6 +1159,7 @@ def _fake_smi(folder, lines):
     return folder
 
 
+@posix_only
 def test_the_gpu_readout_comes_from_nvidia_smi(studio, tmp_path, monkeypatch):
     client, module = studio
     _fake_smi(tmp_path, ["0, NVIDIA GeForce RTX 5090, 87, 12345, 32607, 64, 402.51, 575.00"])
@@ -1163,6 +1171,7 @@ def test_the_gpu_readout_comes_from_nvidia_smi(studio, tmp_path, monkeypatch):
     assert round(gpu["power_w"]) == 403 and gpu["power_limit_w"] == 575
 
 
+@posix_only
 def test_a_card_without_power_readings_and_a_box_without_a_gpu(studio, tmp_path, monkeypatch):
     client, module = studio
     _fake_smi(tmp_path, ["0, Some GPU, 5, 100, 8000, 40, [N/A], [N/A]"])
