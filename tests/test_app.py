@@ -853,6 +853,94 @@ def test_a_class_that_labels_still_use_cannot_be_dropped(studio):
     assert renamed.status_code == 200 and renamed.json()["names"][2] == "lid"
 
 
+def _three_classes(client):
+    upload(client, {
+        "images/a.jpg": image_bytes(),
+        "images/b.jpg": image_bytes(70),
+        "labels/a.txt": b"0 .1 .1 .1 .1\n1 .2 .2 .1 .1\n2 .3 .3 .1 .1\n",
+        "labels/b.txt": b"2 .4 .4 .1 .1\n1 .5 .5 .1 .1\n",
+        "data.yaml": b"names: {0: can, 1: bottle, 2: cap}\n",
+    })
+
+
+def _rows(client, index):
+    return [(b["cls"], round(b["cx"], 2)) for b in
+            client.get(f"/api/datasets/1/labels/{index}").json()["boxes"]]
+
+
+def test_deleting_a_class_rewrites_every_label_file(studio):
+    import yaml
+
+    client, module = studio
+    _three_classes(client)
+    plan = client.post("/api/datasets/1/classes/remove", json={"index": 1, "dry_run": True})
+    assert plan.json() == {"removed": 2, "moved": 0, "files": 2}
+    assert _rows(client, 0) == [(0, 0.1), (1, 0.2), (2, 0.3)]          # a dry run changes nothing
+
+    done = client.post("/api/datasets/1/classes/remove", json={"index": 1}).json()
+    assert done["names"] == ["can", "cap"] and done["removed"] == 2
+    # bottle's boxes are gone; cap moved from 2 to 1, in both files
+    assert _rows(client, 0) == [(0, 0.1), (1, 0.3)]
+    assert _rows(client, 1) == [(1, 0.4)]
+    assert client.get("/api/datasets/1").json()["classes"] == ["can", "cap"]
+    path = Path(client.get("/api/datasets").json()[0]["path"]) / "data.yaml"
+    assert yaml.safe_load(path.read_text())["names"] == {0: "can", 1: "cap"}
+
+
+def test_merging_a_class_moves_its_boxes_before_it_goes(studio):
+    client, _ = studio
+    _three_classes(client)
+    done = client.post("/api/datasets/1/classes/remove", json={"index": 0, "into": 2}).json()
+    assert done["names"] == ["bottle", "cap"] and done["moved"] == 1 and done["removed"] == 0
+    # can (0) became cap; every number above 0 moved down one
+    assert _rows(client, 0) == [(1, 0.1), (0, 0.2), (1, 0.3)]
+    assert _rows(client, 1) == [(1, 0.4), (0, 0.5)]
+
+
+def test_class_changes_keep_a_datasets_own_split(studio):
+    """A Roboflow export's valid/ must stay validation after a class is renamed or removed."""
+    import yaml
+
+    client, _ = studio
+    upload(client, {
+        "train/images/a.jpg": image_bytes(),
+        "train/labels/a.txt": b"0 .5 .5 .2 .2\n1 .2 .2 .1 .1\n",
+        "valid/images/b.jpg": image_bytes(70),
+        "valid/labels/b.txt": b"1 .5 .5 .2 .2\n",
+        "data.yaml": b"train: ../train/images\nval: ../valid/images\nnc: 2\nnames: [can, bottle]\n",
+    })
+    path = Path(client.get("/api/datasets").json()[0]["path"]) / "data.yaml"
+    before = yaml.safe_load(path.read_text())
+    assert before["train"] != before["val"]
+
+    client.post("/api/datasets/1/classes", json={"names": ["can", "bottle", "lid"]})
+    client.post("/api/datasets/1/classes/remove", json={"index": 0})
+    after = yaml.safe_load(path.read_text())
+    assert (after["train"], after["val"]) == (before["train"], before["val"])
+    assert after["names"] == {0: "bottle", 1: "lid"} and "nc" not in after
+
+
+def test_classes_cannot_change_under_a_running_job_or_by_mistake(studio):
+    client, _ = studio
+    _three_classes(client)
+    remove = lambda **body: client.post("/api/datasets/1/classes/remove", json=body)  # noqa: E731
+    assert remove().status_code == 400                           # which class?
+    assert remove(index=5).status_code == 400
+    assert remove(index=1, into=1).status_code == 400            # into itself
+    assert remove(index=1, into=9).status_code == 400
+
+    job = client.post("/api/jobs", json={"dataset_id": 1, "epochs": 1}).json()["id"]
+    refused = remove(index=1)
+    assert refused.status_code == 409 and f"#{job}" in refused.json()["error"]
+    assert _rows(client, 1) == [(2, 0.4), (1, 0.5)]              # untouched
+
+
+def test_the_last_class_stays(studio):
+    client, _ = studio
+    upload(client, {"images/a.jpg": image_bytes(), "labels/a.txt": b"0 .5 .5 .2 .2\n"})
+    assert client.post("/api/datasets/1/classes/remove", json={"index": 0}).status_code == 400
+
+
 def test_saving_a_label_moves_the_count_by_one_without_a_rescan(studio, monkeypatch):
     """One save is one file; it must not walk the whole dataset again."""
     client, module = studio

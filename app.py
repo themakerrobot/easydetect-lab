@@ -478,8 +478,77 @@ def set_classes(dataset_id: int, payload: dict):
             f"or relabel those boxes first",
         )
     db.update_dataset(dataset_id, classes=json.dumps(names, ensure_ascii=False))
-    _write_data_yaml(Path(dataset["path"]), Path(dataset["images_dir"]), names)
+    _rename_in_data_yaml(dataset, names)
     return {"names": names}
+
+
+@app.post("/api/datasets/{dataset_id}/classes/remove")
+def remove_class(dataset_id: int, payload: dict):
+    """Delete a class, or merge it into another; every label file follows.
+
+    Label rows name their class by index, so a class cannot just leave the
+    list: its rows go (or, with ``into``, become that class), and every
+    higher index moves down one, in every label file — or the boxes left
+    would train under their neighbours' names. ``dry_run`` only counts.
+    Refused while a training run or an auto-label pass uses the dataset.
+    """
+    dataset = _dataset(dataset_id)
+    names = json.loads(dataset["classes"])
+    try:
+        index = int(payload["index"])
+        into = None if payload.get("into") in (None, "") else int(payload["into"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(400, "give the class index to remove") from None
+    if not 0 <= index < len(names):
+        raise HTTPException(400, "no such class")
+    if into is not None and (into == index or not 0 <= into < len(names)):
+        raise HTTPException(400, "merge into another existing class")
+    if into is None and len(names) == 1:
+        raise HTTPException(400, "a dataset keeps at least one class")
+    busy = db.one(
+        "SELECT id FROM jobs WHERE dataset_id = ? AND kind IN ('train', 'autolabel')"
+        " AND status IN ('queued', 'running', 'exporting')", (dataset["id"],))
+    if busy:
+        raise HTTPException(409, f"job #{busy['id']} uses this dataset; wait for it or stop it")
+
+    rewrites, removed, moved = [], 0, 0
+    for image in list_images(Path(dataset["images_dir"])):
+        path = label_path(image)
+        if not path.exists():
+            continue
+        lines, changed = [], False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            try:
+                cls = int(float(parts[0]))
+            except (IndexError, ValueError):
+                lines.append(line)            # not a box row: left as it was
+                continue
+            if cls == index:
+                changed = True
+                if into is None:
+                    removed += 1
+                    continue
+                moved += 1
+                cls = into
+            if cls > index:
+                cls -= 1
+                changed = True
+            lines.append(" ".join([str(cls), *parts[1:]]))
+        if changed:
+            rewrites.append((path, lines))
+    result = {"removed": removed, "moved": moved, "files": len(rewrites)}
+    if payload.get("dry_run"):
+        return result
+
+    for path, lines in rewrites:              # each file whole, or not at all
+        scratch = path.with_name(path.name + ".tmp")
+        scratch.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        os.replace(scratch, path)
+    names = names[:index] + names[index + 1:]
+    db.update_dataset(dataset["id"], classes=json.dumps(names, ensure_ascii=False))
+    _rename_in_data_yaml(dataset, names)
+    return {**result, "names": names}
 
 
 # --------------------------------------------------------------------- jobs
@@ -1570,6 +1639,24 @@ def _combine(sources: list[dict], name: str) -> dict:
 
     registered = _register(name, target, names=names)
     return {**registered, "added": copied, "sources": [s["id"] for s in sources]}
+
+
+def _rename_in_data_yaml(dataset: dict, names: list[str]) -> None:
+    """New class names in data.yaml, and nothing else changed.
+
+    Writing it fresh would also reset train/val to the whole folder: a
+    Roboflow export's own valid/ split would vanish, and the next run would
+    train on its validation pictures.
+    """
+    root = Path(dataset["path"])
+    path = root / "data.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    if not isinstance(cfg, dict):
+        _write_data_yaml(root, Path(dataset["images_dir"]), names)
+        return
+    cfg["names"] = dict(enumerate(names))
+    cfg.pop("nc", None)                           # names alone say how many
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
 def _write_data_yaml(root: Path, images_root: Path, names: list[str]) -> Path:

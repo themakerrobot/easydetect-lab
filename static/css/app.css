@@ -163,6 +163,12 @@ img#preview{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .cls .key{font-family:var(--mono);font-size:10.5px;color:var(--ink3);border:1px solid var(--line-soft);
   border-radius:4px;padding:0 5px;flex-shrink:0}
 .cls .key:empty{display:none}
+.cls-more{margin-left:2px;border:0;background:none;color:var(--ink3);cursor:pointer;font-size:14px;
+  line-height:1;padding:0 4px;border-radius:4px;flex-shrink:0}
+.cls-more:hover,.cls-more[aria-expanded="true"]{background:var(--panel2);color:var(--ink)}
+.cls-edit{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line-soft)}
+.cls-edit .row{display:flex;gap:6px;align-items:center}
+.cls-edit select.inp{flex:1;min-width:0;padding:4px 6px;font-size:11.5px}
 .check{display:flex;align-items:center;gap:7px;cursor:pointer}
 .files{margin-top:8px}
 .file{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;

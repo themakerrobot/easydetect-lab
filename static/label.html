@@ -113,6 +113,9 @@ async function boot() {
   document.addEventListener("keydown", onKey);
 }
 
+const esc = (text) => String(text).replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+let editing = -1;                                // the class whose edit row is open
 function renderClasses() {
   const counts = boxes.reduce((acc, b) => (acc[b.cls] = (acc[b.cls] || 0) + 1, acc), {});
   $("classes").innerHTML = "";
@@ -121,11 +124,63 @@ function renderClasses() {
     b.className = "cls" + (i === cls ? " on" : "");
     b.setAttribute("role", "button");
     b.innerHTML = `<div class="top"><span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
-                   <span class="nm">${name}</span><span class="ct num">${counts[i] || ""}</span>
-                   <span class="key">${i < 9 ? i + 1 : ""}</span></div>`;
+                   <span class="nm">${esc(name)}</span><span class="ct num">${counts[i] || ""}</span>
+                   <span class="key">${i < 9 ? i + 1 : ""}</span>
+                   <button class="cls-more" title="${T("클래스 편집")}" aria-expanded="${i === editing}">⋯</button></div>`;
     b.onclick = () => setClass(i);
+    b.querySelector(".cls-more").onclick = (e) => {
+      e.stopPropagation(); editing = editing === i ? -1 : i; renderClasses();
+    };
+    if (i === editing) {
+      const others = dataset.classes.map((n, j) => j === i ? "" : `<option value="${j}">${esc(n)}</option>`).join("");
+      const row = document.createElement("div");
+      row.className = "cls-edit";
+      row.innerHTML = `<button class="db sm" data-act="rename">${T("이름 바꾸기")}</button>
+        ${others ? `<div class="row"><select class="inp sm">${others}</select>
+          <button class="db sm" data-act="merge">${T("로 합치기")}</button></div>` : ""}
+        <button class="db sm danger" data-act="delete">${T("클래스 삭제")}</button>`;
+      row.onclick = (e) => e.stopPropagation();
+      row.querySelector('[data-act="rename"]').onclick = () => renameClass(i);
+      row.querySelector('[data-act="delete"]').onclick = () => removeClass(i, null);
+      row.querySelector('[data-act="merge"]')?.addEventListener("click",
+        () => removeClass(i, Number(row.querySelector("select").value)));
+      b.append(row);
+    }
     $("classes").append(b);
   });
+}
+
+async function renameClass(i) {
+  const name = (prompt(T("새 이름"), dataset.classes[i]) || "").trim();
+  if (!name || name === dataset.classes[i]) return;
+  const names = dataset.classes.map((n, j) => j === i ? name : n);
+  try {
+    await api(`/api/datasets/${DATASET}/classes`, { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ names }) });
+    dataset.classes = names; editing = -1; renderClasses();
+  } catch (e) { $("status").textContent = e.message; }
+}
+
+// Delete a class, or merge it into another (into = its index). Every label
+// file is rewritten on the server, so the current picture is saved first and
+// reloaded after: its boxes come back with the new class numbers.
+async function removeClass(i, into) {
+  const name = dataset.classes[i];
+  const call = (extra) => api(`/api/datasets/${DATASET}/classes/remove`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: i, into, ...extra }) });
+  try {
+    if (dirty) await save();
+    const plan = await call({ dry_run: true });
+    const question = into === null
+      ? T`'${name}' 클래스를 지울까요?\n상자 ${plan.removed}개가 함께 지워지고, 뒤 클래스 번호가 하나씩 당겨져요.`
+      : T`'${name}' 상자 ${plan.moved}개를 '${dataset.classes[into]}'(으)로 옮기고 '${name}' 클래스를 지울까요?`;
+    if (!confirm(question + "\n\n" + T("되돌릴 수 없어요. 필요하면 먼저 데이터셋을 복제해 두세요."))) return;
+    await call({});
+    dataset = await api(`/api/datasets/${DATASET}`);
+    editing = -1; cls = Math.min(cls, dataset.classes.length - 1);
+    boxes = []; lastBoxes = [];                  // both would carry the old class numbers
+    await load(index);
+  } catch (e) { $("status").textContent = e.message; }
 }
 
 async function addClass() {

@@ -56,6 +56,14 @@
     "시작 모델": "Start from", "n 가장 가벼움 · s 기본 · m · l · x 가장 정확": "n lightest · s default · m · l · x most accurate",
     "비워 두면 easydetect가 정해요.": "Left empty, easydetect decides.",
     "겹친 상자 정리 (IoU)": "Overlapping boxes (IoU)", "끄기": "off",
+    "클래스 편집": "Edit class", "이름 바꾸기": "Rename", "로 합치기": "Merge into it",
+    "클래스 삭제": "Delete class", "새 이름": "New name",
+    "'{0}' 클래스를 지울까요? 상자 {1}개가 함께 지워지고, 뒤 클래스 번호가 하나씩 당겨져요.":
+      "Delete the class '{0}'?\nIts {1} boxes go with it, and the classes after it move up one number.",
+    "'{0}' 상자 {1}개를 '{2}'(으)로 옮기고 '{3}' 클래스를 지울까요?":
+      "Move the {1} '{0}' boxes to '{2}' and delete the class '{3}'?",
+    "되돌릴 수 없어요. 필요하면 먼저 데이터셋을 복제해 두세요.":
+      "This cannot be undone. Duplicate the dataset first if you may want it back.",
     "이만큼 넘게 겹친 상자는 점수 높은 것 하나만 남겨요. 1이면 꺼요.":
       "Boxes overlapping more than this keep only the highest score. 1 turns it off.",
     "같은 물체의 조각 상자 합치기": "Merge pieces of one object",

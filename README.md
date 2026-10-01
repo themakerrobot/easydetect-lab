@@ -76,7 +76,12 @@ Button names below are the English ones.
    automatic. The wheel zooms and the middle button (or <kbd>Space</kbd>) pans,
    for boxes too small to place at fit-to-window. <kbd>C</kbd> copies the
    previous image's boxes — a fixed camera repeats itself. Classes can be added
-   from the sidebar and show how many boxes each has, and the file list can hide
+   from the sidebar and show how many boxes each has; ⋯ beside one renames it,
+   merges it into another class (its boxes move there) or deletes it with its
+   boxes. Label files store classes by number, so a merge or delete rewrites
+   every label file and moves the classes after it down one; it says how many
+   boxes it touches before it does, and waits while a run uses the dataset.
+   The file list can hide
    what is already labelled. A dataset spread over folders (`train/images`,
    `valid/images`, …) can be browsed one folder at a time, and ←/→ stay in it;
    background frames — a label with no boxes — are marked apart from pictures
@@ -194,7 +199,8 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `GET`/`POST /api/datasets/{id}/labels/{index}` | read and write one image's boxes |
 | `POST /api/datasets/{id}/autolabel/{index}` | boxes for one image, from a model |
 | `POST /api/datasets/{id}/autolabel` | queue a pass over the whole dataset |
-| `POST /api/datasets/{id}/classes` | rename or add classes; data.yaml follows |
+| `POST /api/datasets/{id}/classes` | rename or add classes; data.yaml follows, its split kept |
+| `POST /api/datasets/{id}/classes/remove` | `{index, into?, dry_run?}` — delete a class, or merge it into `into`; every label file follows |
 | `GET /api/models` | the registry, plus the names that download themselves |
 | `POST /api/models` | `{job_id, name, note}` — register a finished run |
 | `POST /api/models/upload` | multipart: `name`, `files` (a .pt or .onnx, or an IR's .xml + .bin together), `classes` |
