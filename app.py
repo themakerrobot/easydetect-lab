@@ -663,7 +663,7 @@ def _box_filters(iou: str | None, contain: str | None) -> dict:
 @app.post("/api/predict")
 async def batch_predict(
     model: str = Form(...),
-    conf: float = Form(0.25),
+    conf: float = Form(0.5),
     dataset_id: int = Form(None),
     path: str = Form(None),
     video: UploadFile = None,
@@ -864,7 +864,7 @@ def evaluate_job(job_id: int, payload: dict = None):
         resume_of=job_id,
         dataset_id=job["dataset_id"],
         model=job["model"],
-        conf=float((payload or {}).get("conf", 0.25)),
+        conf=float((payload or {}).get("conf", 0.5)),
     )
     return {"id": new_id}
 
@@ -1245,7 +1245,7 @@ def job_modelcard(job_id: int, repo: str | None = None, folder: str | None = Non
 
 
 @app.post("/api/jobs/{job_id}/predict")
-async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.25)):
+async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)):
     """Try the trained model on one image; returns the annotated JPEG."""
     import cv2
     import numpy as np
@@ -1274,7 +1274,7 @@ async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.25
 
 
 @app.post("/api/preview")
-async def preview(model: str = Form(...), conf: float = Form(0.35), image: UploadFile = None,
+async def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile = None,
                   iou: str = Form(None), contain: str = Form(None)):
     """One frame in, one annotated frame out — what the webcam preview posts to."""
     filters = _box_filters(iou, contain)

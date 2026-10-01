@@ -331,7 +331,7 @@ class Worker(threading.Thread):
 
         self.db.update_job(job_id, status="running", started=time.time(), detail=None, progress=0)
         model = Detector(str(weights), verbose=False)
-        conf = job["conf"] or 0.25
+        conf = job["conf"] or 0.5
 
         metrics = validate_torch(
             model.net, data_yaml, imgsz=parent["imgsz"], batch=1, device="cpu", workers=0
@@ -419,7 +419,7 @@ class Worker(threading.Thread):
                            run_dir=str(out), detail="모델 불러오는 중…")
 
         model = Detector(job["model"], verbose=False)
-        conf = job["conf"] or 0.25
+        conf = job["conf"] or 0.5
         loader = SourceLoader(job["source"], vid_stride=1)
         total = max(len(loader), 1)
         records, found, video = [], 0, None

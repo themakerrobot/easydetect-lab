@@ -67,8 +67,8 @@
     "이만큼 넘게 겹친 상자는 점수 높은 것 하나만 남겨요. 1이면 꺼요.":
       "Boxes overlapping more than this keep only the highest score. 1 turns it off.",
     "같은 물체의 조각 상자 합치기": "Merge pieces of one object",
-    "가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요.":
-      "When a half hidden object comes back as the whole and its pieces, a box with over 80% of it inside another of its class is merged into one.",
+    "가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요. 그런 장면에서만 켜요: 겹쳐 있는 진짜 물체(군중, 책장)도 지워서 평균으로는 손해예요.":
+      "When a half hidden object comes back as the whole and its pieces, a box with over 80% of it inside another of its class is merged into one. Turn it on for such scenes only: it also removes real objects that overlap (crowds, shelves), a loss on average.",
     "학습률": "Learning rate", "자동: 배치 {0} → {1}": "auto: batch {0} → {1}",
     "백본 학습률 비율": "Backbone learning-rate share",
     "학습률에 곱해요. 자동은 모델 크기별 (n·s 0.5, m 0.1, l 0.05, x 0.01)":

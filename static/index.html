@@ -162,8 +162,8 @@
       <div class="field"><div class="pb-label" data-en="Model">모델</div><select class="inp" id="run-model"></select></div>
       <div class="field">
         <div class="prg"><div class="lb"><span>확신 정도 (conf)</span></div></div>
-        <div class="range"><input id="run-conf" type="range" min="0.05" max="0.95" step="0.05" value="0.25">
-          <output id="run-conf-out">0.25</output></div>
+        <div class="range"><input id="run-conf" type="range" min="0.05" max="0.95" step="0.05" value="0.5">
+          <output id="run-conf-out">0.50</output></div>
         <div class="hint">낮추면 더 많이 찾고, 높이면 확실한 것만 남아요.</div></div>
       <div class="field">
         <div class="prg"><div class="lb"><span>겹친 상자 정리 (IoU)</span></div></div>
@@ -171,7 +171,7 @@
           <output id="run-iou-out">0.70</output></div>
         <div class="hint">이만큼 넘게 겹친 상자는 점수 높은 것 하나만 남겨요. 1이면 꺼요.</div>
         <label class="check" style="margin-top:8px"><input type="checkbox" id="run-contain"> 같은 물체의 조각 상자 합치기</label>
-        <div class="hint">가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요.</div></div>
+        <div class="hint">가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요. 그런 장면에서만 켜요: 겹쳐 있는 진짜 물체(군중, 책장)도 지워서 평균으로는 손해예요.</div></div>
       <div class="field"><div class="pb-label">대상</div>
         <div class="row seg full" id="run-tabs">
           <button class="db on" data-run="dataset" aria-pressed="true">데이터셋</button>
@@ -285,7 +285,7 @@
         <div class="row" style="align-items:center;flex-wrap:wrap">
           <label class="dropzone compact" style="flex:1;min-width:200px"><input id="try-file" type="file" accept="image/*">
             <b data-drop>이미지 한 장</b><span>끌어다 놓거나 눌러요</span></label>
-          <input class="inp" id="try-conf" type="number" value="0.25" step="0.05" min="0" max="1" style="flex:none;width:72px" title="확신 정도 (conf)">
+          <input class="inp" id="try-conf" type="number" value="0.5" step="0.05" min="0" max="1" style="flex:none;width:72px" title="확신 정도 (conf)">
           <button class="db go" id="try">추론</button>
         </div>
         <img id="preview" hidden alt="">
@@ -988,7 +988,7 @@ function pythonSnippet(path, device) {
   return `from easydetect import Detector
 
 model = Detector(r"${path}"${device ? `, device="${device}"` : ""})   # AUTO · CPU · GPU · NPU
-results = model("photo.jpg", conf=0.25)
+results = model("photo.jpg", conf=0.5)
 
 for r in results:
     for box, score, cls in zip(r.boxes.xyxy, r.boxes.conf, r.boxes.cls):
@@ -1013,7 +1013,7 @@ function renderCode(job) {
   const snippets = {
     python: pythonSnippet(path),
     cli: `# ${T("이미지 · 폴더 · 영상 — 결과는 runs/detect/predict/")}
-easydetect predict model="${path}" source=photo.jpg conf=0.25
+easydetect predict model="${path}" source=photo.jpg conf=0.5
 
 # ${T("웹캠 창으로 (q 또는 Esc로 종료)")}
 easydetect predict model="${path}" source=0 show=true save=false`,
@@ -1084,7 +1084,7 @@ const general = () => `pip install easydetect
 from easydetect import Detector
 
 model = Detector("dfine-s")        # ${T("처음 한 번 가중치를 받아요 (COCO 80 클래스)")}
-model("photo.jpg", conf=0.25)[0].save("result.jpg")
+model("photo.jpg", conf=0.5)[0].save("result.jpg")
 
 # ${T("학습한 모델은 그 경로를 그대로 넣어요")}
 model = Detector(r"runs/job3/openvino/best.xml")`;
@@ -1109,7 +1109,7 @@ document.addEventListener("click", async (e) => {
 // ---------------------------------------------------------------- job actions
 $("evaluate").onclick = async () => {
   try { const res = await api(`/api/jobs/${current}/evaluate`, { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conf: 0.25 }) });
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conf: 0.5 }) });
     await select(res.id); }
   catch (e) { say("detail-msg", e.message, "err"); }
 };
@@ -1167,7 +1167,7 @@ $("try").onclick = async () => {
   if (!file) return say("detail-msg", "시험할 이미지를 골라 주세요", "err");
   const form = new FormData();
   form.append("image", file);
-  form.append("conf", $("try-conf").value || "0.25");
+  form.append("conf", $("try-conf").value || "0.5");
   say("detail-msg", "추론 중…");
   $("try").disabled = true;
   try {
@@ -1205,7 +1205,7 @@ $("run-start").onclick = async () => {
   const msg = (t, kind) => say("run-msg", t, kind);
   const form = new FormData();
   form.append("model", $("run-model").value);
-  form.append("conf", $("run-conf").value || "0.25");
+  form.append("conf", $("run-conf").value || "0.5");
   addBoxFilters(form);
   if (runTab === "dataset") {
     if (!$("run-dataset").value) return msg("데이터셋이 없어요", "err");
@@ -1259,7 +1259,7 @@ $("cam-start").onclick = async () => {
     const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.8));
     const form = new FormData();
     form.append("model", $("run-model").value);
-    form.append("conf", $("run-conf").value || "0.25");
+    form.append("conf", $("run-conf").value || "0.5");
     addBoxFilters(form);
     form.append("image", blob, "frame.jpg");
     try {

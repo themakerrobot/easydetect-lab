@@ -129,10 +129,13 @@ Button names below are the English ones.
    draws every one of those frames with the truth in green and the prediction in
    its class colour, next to per-class AP. A single mAP says whether to keep
    going; this says what to fix.
-7. **Run it on everything else** — under the confidence slider, *IoU* sets how
+7. **Run it on everything else** — the confidence slider starts at 0.5, where
+   D-FINE's boxes are mostly right (70% on COCO val2017, against 32% at YOLO's
+   usual 0.25; the table is in easydetect's docs/performance.md). Under it, *IoU* sets how
    much two boxes may overlap before only the better one stays (1 turns it
    off), and *Merge pieces of one object* folds the pieces of a half hidden
-   object into its whole (easydetect's `contain=0.8`); both apply to the
+   object into its whole (easydetect's `contain=0.8`; off by default — on COCO it
+   removes more real objects than it fixes); both apply to the
    webcam, a single picture and batch runs alike.
    *Predict* takes a dataset, a folder path on this
    machine, or an uploaded video, and queues it like a training job. While it

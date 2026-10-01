@@ -252,7 +252,7 @@ def model_card(facts: dict) -> str:
         f'root = snapshot_download("{repo}", allow_patterns="{pattern}")',
         *runtime_lines,
         "",
-        'for r in model("photo.jpg", conf=0.25):',
+        'for r in model("photo.jpg", conf=0.5):',
         "    for box, score, cls in zip(r.boxes.xyxy, r.boxes.conf, r.boxes.cls):",
         '        print(r.names[int(cls)], f"{score:.2f}", box.astype(int).tolist())',
         '    r.save("result.jpg")                  # the picture with boxes drawn',
@@ -265,7 +265,7 @@ def model_card(facts: dict) -> str:
         "From the command line, once downloaded:",
         "",
         "```bash",
-        f"easydetect predict model=<download folder>/{path} source=photo.jpg conf=0.25",
+        f"easydetect predict model=<download folder>/{path} source=photo.jpg conf=0.5",
         "```",
     ]
     if "best.pt" in files:
