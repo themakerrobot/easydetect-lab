@@ -136,6 +136,19 @@
             <div><div class="pb-label">장치</div>
               <select class="inp" id="job-device"><option value="">자동</option><option value="cpu">CPU</option><option value="0">GPU 0</option></select></div>
           </div>
+          <div class="pb-label" style="margin-top:12px">옵티마이저</div>
+          <div class="hint" style="margin-top:0">비워 두면 easydetect가 정해요.</div>
+          <div class="grid2">
+            <div><div class="pb-label">학습률</div><input class="inp" id="job-lr" type="number" step="0.00001" min="0" placeholder="자동">
+              <div class="hint" id="job-lr-hint"></div></div>
+            <div><div class="pb-label">백본 학습률 비율</div><input class="inp" id="job-lr-bb" type="number" step="0.05" min="0" max="1" placeholder="자동">
+              <div class="hint">학습률에 곱해요. 자동은 모델 크기별 (n·s 0.5, m 0.1, l 0.05, x 0.01)</div></div>
+            <div><div class="pb-label">워밍업 에폭</div><input class="inp" id="job-warmup" type="number" step="0.5" min="0" placeholder="1"></div>
+            <div><div class="pb-label">weight decay</div><input class="inp" id="job-wd" type="number" step="0.00001" min="0" placeholder="0.0001"></div>
+            <div><div class="pb-label">seed</div><input class="inp" id="job-seed" type="number" step="1" min="0" placeholder="0"></div>
+            <div><div class="pb-label">AMP</div>
+              <label class="check"><input type="checkbox" id="job-amp" checked> 혼합 정밀도 (GPU만, 빨라요)</label></div>
+          </div>
         </details>
         <button class="db go block" id="job-start">학습 시작</button>
         <div class="msg" id="job-msg"></div>
@@ -647,8 +660,13 @@ function presetHint() {
   $("preset-hint").textContent = [`${$("job-imgsz").value}px`, T`${$("job-epochs").value}에폭`,
     T`배치 ${$("job-batch").value}`, $("job-freeze").value ? T("백본 고정") : "",
     Number($("job-patience").value) ? T`${$("job-patience").value}에폭 정체 시 멈춤` : "",
-    $("job-augment").checked ? T("증강") : "", gpu ? gpu.name : "CPU"]
+    $("job-augment").checked ? T("증강") : "", $("job-lr").value ? `lr ${$("job-lr").value}` : "",
+    gpu ? gpu.name : "CPU"]
     .filter(Boolean).join(" · ");
+  // easydetect's rule when no rate is given: 1e-4 at a batch of 4, × √(batch / 4)
+  const batch = Math.max(1, Number($("job-batch").value) || 1);
+  $("job-lr-hint").textContent = $("job-lr").value ? ""
+    : T`자동: 배치 ${batch} → ${+(1e-4 * Math.sqrt(batch / 4)).toPrecision(2)}`;
 }
 // A goal fills in the fields you have not touched; one you changed by hand
 // stays as you set it — a button must not quietly undo a choice
@@ -682,6 +700,7 @@ Object.values(PRESET_FIELDS).forEach((id) => {
   $(id).addEventListener("input", presetHint);
   $(id).addEventListener("change", () => { touched.add(id); presetHint(); showKept(); });
 });
+$("job-lr").addEventListener("input", presetHint);
 presetHint();
 
 $("job-start").onclick = async () => {
@@ -701,6 +720,9 @@ $("job-start").onclick = async () => {
         batch: Number($("job-batch").value), freeze: $("job-freeze").value,
         patience: $("job-patience").value === "" ? null : Number($("job-patience").value),
         augment: $("job-augment").checked,
+        lr: $("job-lr").value, lr_backbone_mult: $("job-lr-bb").value,
+        warmup_epochs: $("job-warmup").value, weight_decay: $("job-wd").value,
+        seed: $("job-seed").value, amp: $("job-amp").checked,
         val_ratio: Number($("job-val").value), device: $("job-device").value })});
     say("job-msg", T`#${res.id}을(를) 대기열에 넣었어요`, "ok");
     await select(res.id);
@@ -846,7 +868,7 @@ function renderInfo(job) {
     ["검증 데이터", count(va)],
     ["학습하는 파라미터", `${m(run.trainable_params)} · ${run.freeze ? T`${run.freeze} 고정` : T("전체")}`],
     ["장치", `${run.gpu || run.device}${run.amp ? " · AMP" : ""}`],
-    ["옵티마이저", o.name ? `${o.name} · lr ${o.lr} (${T`백본 ${o.lr_backbone}`}) · wd ${o.weight_decay}` : "—"],
+    ["옵티마이저", o.name ? `${o.name} · lr ${+o.lr.toPrecision(3)}${o.lr_from && o.lr_from !== "set" ? ` (${T`배치 ${run.batch} 기준 자동`})` : ""} · ${T`백본 ${+o.lr_backbone.toPrecision(3)}`} · wd ${o.weight_decay}` : "—"],
     ["스케줄", o.name ? `warmup ${T`${o.warmup_epochs}에폭`} → cosine · clip ${o.grad_clip}` : "—"],
     ["증강", (run.augment || []).map((a) => a.replace(/ \(.*\)/, "")).join(", ") || "—"],
     ["조기 종료", `patience ${run.patience}${run.stopped_early ? ` · ${T("일찍 멈춤")}` : ""}`],

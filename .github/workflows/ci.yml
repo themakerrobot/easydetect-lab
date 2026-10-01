@@ -47,3 +47,35 @@ jobs:
           curl -sSfL -o /tmp/kit.css \
             https://raw.githubusercontent.com/themakerrobot/themaker-ui/v1.0.0/themaker-ui.css
           diff -u /tmp/kit.css static/css/themaker-ui.css
+
+  windows:
+    # the classroom case: a Windows laptop, CPU only, started from start-lab.bat
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Tests on Windows
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt pytest httpx
+          pytest -q
+      - name: start-lab.bat installs everything and serves the lab
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath cmd.exe -PassThru -NoNewWindow `
+            -ArgumentList '/c', 'start-lab.bat', '--no-browser', '--https-port', '0' `
+            -RedirectStandardOutput lab.log -RedirectStandardError lab.err
+          $ok = $false
+          for ($i = 0; $i -lt 120; $i++) {
+            Start-Sleep -Seconds 10
+            try {
+              $r = Invoke-WebRequest http://127.0.0.1:8080/ -UseBasicParsing -TimeoutSec 5
+              if ($r.Content -match 'easydetect lab') { $ok = $true; break }
+            } catch {}
+          }
+          Get-Content lab.log, lab.err -ErrorAction SilentlyContinue | Select-Object -Last 40
+          taskkill /F /T /PID $p.Id | Out-Null
+          if (-not $ok) { Write-Error "the lab did not answer on :8080"; exit 1 }

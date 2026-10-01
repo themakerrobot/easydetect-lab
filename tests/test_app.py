@@ -679,6 +679,50 @@ def test_augmentation_is_chosen_per_run(studio):
     assert augment() is None                  # the package's default
 
 
+def test_optimizer_settings_are_chosen_per_run_and_carried_into_a_resume(studio):
+    client, module = studio
+    upload(client, {"images/a.jpg": image_bytes(), "labels/a.txt": b"0 .5 .5 .2 .2\n"})
+    columns = ("lr", "lr_backbone_mult", "weight_decay", "warmup_epochs", "seed", "amp")
+
+    def stored(**extra):
+        response = client.post("/api/jobs", json={"dataset_id": 1, **extra})
+        assert response.status_code == 200, response.text
+        job = module.db.one("SELECT * FROM jobs WHERE id = ?", (response.json()["id"],))
+        return {k: job[k] for k in columns}
+
+    # empty fields from the form, or none at all: easydetect decides every one
+    assert stored() == dict.fromkeys(columns)
+    assert stored(lr="", lr_backbone_mult="", weight_decay="", warmup_epochs="",
+                  seed="") == dict.fromkeys(columns)
+    assert stored(lr="0.0002", lr_backbone_mult=0.25, weight_decay=0, warmup_epochs="2",
+                  seed="7", amp=False) == {
+        "lr": 2e-4, "lr_backbone_mult": 0.25, "weight_decay": 0.0, "warmup_epochs": 2.0,
+        "seed": 7, "amp": 0}
+    for bad in ({"lr": "fast"}, {"lr": 0.5}, {"lr_backbone_mult": 2}, {"seed": -1}):
+        assert client.post("/api/jobs", json={"dataset_id": 1, **bad}).status_code == 400, bad
+
+    # a run continued later keeps the settings it started with
+    job = client.post("/api/jobs", json={"dataset_id": 1, "lr": 3e-4, "amp": False}).json()["id"]
+    run = module.RUNS / f"job{job}" / "weights"
+    run.mkdir(parents=True)
+    (run / "last.pt").write_bytes(b"w")
+    module.db.update_job(job, status="done", run_dir=str(run.parent))
+    more = client.post(f"/api/jobs/{job}/resume", json={"add_epochs": 5}).json()["id"]
+    again = module.db.one("SELECT lr, amp FROM jobs WHERE id = ?", (more,))
+    assert again == {"lr": 3e-4, "amp": 0}
+
+
+def test_the_worker_hands_only_the_settings_that_were_set_to_train():
+    from worker import _optimizer_kwargs
+
+    unset = {"lr": None, "lr_backbone_mult": None, "weight_decay": None,
+             "warmup_epochs": None, "seed": None, "amp": None}
+    assert _optimizer_kwargs(unset) == {}
+    assert _optimizer_kwargs({}) == {}        # a row from before the columns existed
+    assert _optimizer_kwargs({**unset, "lr": 2e-4, "seed": 3, "amp": 0}) == {
+        "lr0": 2e-4, "seed": 3, "amp": False}
+
+
 def test_a_database_from_before_early_stopping_gets_the_column(tmp_path):
     import sqlite3
 

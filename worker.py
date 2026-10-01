@@ -67,6 +67,16 @@ def _tail(path: Path, lines: int = 8) -> str:
     return " / ".join(text[-lines:])[:600]
 
 
+def _optimizer_kwargs(job) -> dict:
+    """The run's optimizer settings as ``train()`` takes them; unset ones stay out."""
+    names = {"lr": "lr0", "lr_backbone_mult": "lr_backbone_mult",
+             "weight_decay": "weight_decay", "warmup_epochs": "warmup_epochs", "seed": "seed"}
+    out = {arg: job[column] for column, arg in names.items() if job.get(column) is not None}
+    if job.get("amp") is not None:
+        out["amp"] = bool(job["amp"])
+    return out
+
+
 class Worker(threading.Thread):
     def __init__(self, db, runs_dir: Path, poll: float = 1.0) -> None:
         super().__init__(daemon=True)
@@ -222,6 +232,7 @@ class Worker(threading.Thread):
                     device=job["device"] or None,
                     **({} if job["patience"] is None else {"patience": job["patience"]}),
                     **({} if job["augment"] is None else {"augment": bool(job["augment"])}),
+                    **_optimizer_kwargs(job),
                     project=str(self.runs_dir),
                     name=run_name,
                     resume=bool(job["resume_of"]),

@@ -54,6 +54,13 @@
     "상자를 그린 데이터셋이 아직 없어요.": "No dataset has boxes yet.", "데이터셋 추가하기": "Add a dataset",
     "목표": "Goal", "빠르게": "Fast", "균형": "Balanced", "정확하게": "Accurate",
     "시작 모델": "Start from", "n 가장 가벼움 · s 기본 · m · l · x 가장 정확": "n lightest · s default · m · l · x most accurate",
+    "비워 두면 easydetect가 정해요.": "Left empty, easydetect decides.",
+    "학습률": "Learning rate", "자동: 배치 {0} → {1}": "auto: batch {0} → {1}",
+    "백본 학습률 비율": "Backbone learning-rate share",
+    "학습률에 곱해요. 자동은 모델 크기별 (n·s 0.5, m 0.1, l 0.05, x 0.01)":
+      "Multiplies the learning rate. Auto goes by model size (n·s 0.5, m 0.1, l 0.05, x 0.01)",
+    "워밍업 에폭": "Warmup epochs", "혼합 정밀도 (GPU만, 빨라요)": "Mixed precision (GPU only, faster)",
+    "배치 {0} 기준 자동": "auto for batch {0}",
     "에폭": "Epochs", "배치": "Batch", "고급 설정": "Advanced", "입력 크기": "Input size", "검증 비율": "Validation share",
     "백본 고정": "Freeze backbone", "예 (빨라요)": "Yes (faster)", "아니오": "No", "장치": "Device", "학습 시작": "Start training",
     "{0}에폭": "{0} epochs", "배치 {0}": "batch {0}",

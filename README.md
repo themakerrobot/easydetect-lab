@@ -25,6 +25,26 @@ lab then runs on that clone's code, released or not — what you want while
 changing the package, and only then. `pip uninstall easydetect` and
 `pip install -r requirements.txt` go back to the release.
 
+### Windows: double-click
+
+`start-lab.bat` in this folder starts the lab and opens the browser. The first
+time it makes a `.venv` folder beside it and installs everything into it (a few
+minutes; it needs [Python](https://www.python.org/downloads/) 3.10 or newer,
+installed with *Add python.exe to PATH*); after a `git pull` that changes
+`requirements.txt` it installs again. Closing the window stops the lab.
+Windows asks once whether Python may use the network — allow it for other
+machines to reach the lab.
+
+PyTorch from PyPI is the CPU build on Windows. On a PC with an NVIDIA GPU,
+install the CUDA build into that folder once:
+
+```bat
+.venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+```
+
+To use a Python you already have (a conda env, say) instead of `.venv`,
+`set LAB_PYTHON=C:\path\to\python.exe` before running it.
+
 ![the lab](docs/lab.jpg)
 
 [PLAN.md](PLAN.md) is what this is meant to become, and what is missing today.
@@ -72,7 +92,12 @@ Button names below are the English ones.
    `best.pt` you can point the auto-labeller at it.
 5. **Train** — a goal (빠르게 / 균형 / 정확하게) or your own model, epochs,
    batch, backbone freezing, "stop when it stops improving" (patience) and
-   zoom/crop augmentation; image size and device under 고급 설정. A goal fills
+   zoom/crop augmentation; image size and device under 고급 설정, and there
+   too the optimizer: learning rate, the backbone's share of it, warmup epochs,
+   weight decay, seed and mixed precision. Left empty, easydetect decides —
+   the learning rate from the batch size (`1e-4 × √(batch / 4)`, shown under
+   the field as you change the batch), so a bigger batch does not quietly
+   learn less. A goal fills
    only the fields you have not changed yourself. The header shows each NVIDIA GPU live —
    utilisation, memory, temperature, power, read from `nvidia-smi` every two
    seconds — and warns when the driver sees a GPU that PyTorch cannot use (a CPU
@@ -171,7 +196,7 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `DELETE /api/models/{id}` | forget it (files stay) |
 | `POST /api/predict` | multipart: `model`, `conf`, and one of `dataset_id`, `path`, `video` |
 | `POST /api/preview` | multipart: `model`, `conf`, `image` → annotated JPEG, one frame |
-| `POST /api/jobs` | `{dataset_id, model, epochs, imgsz, batch, freeze, device}` |
+| `POST /api/jobs` | `{dataset_id, model, epochs, imgsz, batch, freeze, device}`, optional `patience`, `augment`, `lr`, `lr_backbone_mult`, `weight_decay`, `warmup_epochs`, `seed`, `amp` |
 | `GET /api/jobs` · `GET /api/jobs/{id}` | the second includes per-epoch rows |
 | `GET /api/gpu` | utilisation, memory, temperature and power per GPU, from nvidia-smi |
 | `GET /api/jobs/{id}/stream` | server-sent events: progress, then a status |
@@ -237,6 +262,6 @@ its `platform.db`.
 브라우저에서 라벨링 → 학습 → 평가 → 추론 → 배포까지 하는 앱입니다. 검출
 패키지 [easydetect](https://github.com/themakerrobot/easydetect)는 PyPI에서
 받아 쓰고, 이 저장소에는 앱만 있습니다. `pip install -r requirements.txt` 후
-`python run.py`. 앱 업데이트는 `git pull`, 패키지 업데이트는
+`python run.py`. Windows에서는 `start-lab.bat`을 더블클릭하면 처음 한 번 설치하고 바로 열립니다. 앱 업데이트는 `git pull`, 패키지 업데이트는
 `pip install -U "easydetect[train]"`입니다. 예전 `platform/` 시절 데이터는
 `python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.

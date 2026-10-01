@@ -620,8 +620,39 @@ def create_job(payload: dict):
         patience=_patience(payload.get("patience")),
         augment=None if payload.get("augment") is None else int(bool(payload["augment"])),
         device=payload.get("device") or None,
+        **_optimizer_settings(payload),
     )
     return {"id": job_id}
+
+
+#: Optimizer settings a run may set, with the range each must fall in. Left
+#: out (or empty), easydetect decides: the learning rate from the batch size,
+#: the backbone's share from the model size, and its own defaults for the rest.
+OPTIMIZER_SETTINGS = {
+    "lr": (float, 1e-7, 1e-2),
+    "lr_backbone_mult": (float, 0.0, 1.0),
+    "weight_decay": (float, 0.0, 1.0),
+    "warmup_epochs": (float, 0.0, 1000.0),
+    "seed": (int, 0, 2**31 - 1),
+}
+
+
+def _optimizer_settings(payload: dict) -> dict:
+    out = {}
+    for key, (kind, low, high) in OPTIMIZER_SETTINGS.items():
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            value = kind(value)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"{key} must be a number") from None
+        if not low <= value <= high:
+            raise HTTPException(400, f"{key} must be between {low:g} and {high:g}")
+        out[key] = value
+    if payload.get("amp") is not None:
+        out["amp"] = int(bool(payload["amp"]))
+    return out
 
 
 def _patience(value) -> int | None:
@@ -722,6 +753,7 @@ def resume_job(job_id: int, payload: dict = None):
         patience=job["patience"],
         augment=job["augment"],
         device=job["device"],
+        **{key: job[key] for key in (*OPTIMIZER_SETTINGS, "amp")},
         detail=f"#{root} 이어서 +{max(add, 1)}에폭",
     )
     return {"id": new_id}
