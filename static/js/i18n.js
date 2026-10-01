@@ -49,8 +49,8 @@
     "폴더 경로를 적어 주세요": "Enter a folder path", "올리는 중…": "Uploading…", "복제했어요": "Duplicated",
 
     // training
-    "COCO 가중치에서 시작해 내 데이터에 맞춰요. 끝나면 OpenVINO IR도 만들어 둬요.":
-      "Starts from the COCO weights and fits them to your data. An OpenVINO IR is exported at the end.",
+    "COCO 가중치에서 시작해 내 데이터에 맞춰요. 끝나면 OpenVINO IR과 ONNX도 만들어 둬요.":
+      "Starts from the COCO weights and fits them to your data. An OpenVINO IR and an ONNX are exported at the end.",
     "상자를 그린 데이터셋이 아직 없어요.": "No dataset has boxes yet.", "데이터셋 추가하기": "Add a dataset",
     "목표": "Goal", "빠르게": "Fast", "균형": "Balanced", "정확하게": "Accurate",
     "시작 모델": "Start from", "n 가장 가벼움 · s 기본 · m · l · x 가장 정확": "n lightest · s default · m · l · x most accurate",
@@ -144,6 +144,8 @@
     "웹캠 창으로 (q 또는 Esc로 종료)": "in a webcam window (q or Esc quits)",
     "다운로드 → OpenVINO IR 로 zip을 받아 풀어요 ({0} · .bin · labels.txt)": "Download → OpenVINO IR, and unzip it ({0} · .bin · labels.txt)",
     "그 PC에는 추론용만 설치해요 — PyTorch 없이 돼요": "on that PC install the inference package only — no PyTorch needed",
+    "라즈베리파이처럼 Intel이 아닌 PC는 다운로드 → ONNX zip ({0} · labels.txt)": "on a non-Intel PC such as a Raspberry Pi: Download → ONNX zip ({0} · labels.txt)",
+    "ONNX zip이면": "with the ONNX zip",
     "파이썬에서": "in Python", "Intel NPU면 \"NPU\"": "\"NPU\" on an Intel NPU",
     "\"업로드용 zip 받기\" → 풀면 {0}/ 폴더 (모델 · labels.txt · README.md)": "\"Download the upload zip\" → unzips to {0}/ (model · labels.txt · README.md)",
     "한 번만: 쓰기 권한 토큰으로 로그인": "once: log in with a token that can write",

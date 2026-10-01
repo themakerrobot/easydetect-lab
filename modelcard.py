@@ -97,8 +97,14 @@ def model_card(facts: dict) -> str:
     spec = VARIANTS.get(variant, {"backbone": variant, "decoder": "?", "params": "?", "coco": "—"})
     repo, folder = facts["repo"], facts["folder"].strip("/")
     files = facts.get("files") or []
-    xml = next((f for f in files if f.endswith(".xml")), "best.xml")
-    stem = xml[: -len(".xml")]
+    xml = next((f for f in files if f.endswith(".xml")), None)
+    onnx = next((f for f in files if f.endswith(".onnx")), None)
+    if xml is None and onnx is None:
+        xml = "best.xml"
+    stem = (xml or onnx).rsplit(".", 1)[0]
+    runtimes = " or ".join(
+        r for r, f in (("OpenVINO (CPU, Intel GPU, NPU)", xml),
+                       ("ONNX Runtime (any CPU, a Raspberry Pi included)", onnx)) if f)
 
     start = facts.get("start")
     started_from = {
@@ -150,14 +156,15 @@ def model_card(facts: dict) -> str:
         "tags:",
         "  - object-detection",
         "  - d-fine",
-        "  - openvino",
+        *(["  - openvino"] if xml else []),
+        *(["  - onnx"] if onnx else []),
         "---",
         "",
         f"# {facts['title']} — D-FINE-{variant.upper()}",
         "",
         "Finds " + ", ".join(f"**{n}**" for n in names) + " in images and video." if names else "",
-        "Trained with [easydetect](https://github.com/themakerrobot/easydetect); runs on OpenVINO "
-        "(CPU, Intel GPU, NPU) with no PyTorch needed at inference.",
+        f"Trained with [easydetect](https://github.com/themakerrobot/easydetect); runs on "
+        f"{runtimes} with no PyTorch needed at inference.",
         "",
         "| | |",
         "| --- | --- |",
@@ -201,6 +208,7 @@ def model_card(facts: dict) -> str:
     what = {
         f"{stem}.xml": "OpenVINO IR — the network",
         f"{stem}.bin": "OpenVINO IR — the weights",
+        f"{stem}.onnx": "ONNX — the same network, for ONNX Runtime",
         "labels.txt": "class names, one per line (line number = class id)",
         f"{stem}.names.json": "the same names, keyed by id",
         "best.pt": "PyTorch checkpoint — to train further or export again",
@@ -211,7 +219,23 @@ def model_card(facts: dict) -> str:
                 *[f"| `{f}` | {what[f]} |" for f in listed]]
 
     pattern = f"{folder}/*" if folder else "*"
-    path = f"{folder}/{xml}" if folder else xml
+    def at(name):
+        return f"{folder}/{name}" if folder else name
+
+    path = at(xml or onnx)
+    openvino_line = (f'model = Detector(f"{{root}}/{path}")      '
+                     '# device="CPU" / "GPU" / "NPU", default AUTO')
+    if xml and onnx:
+        runtime_lines = [
+            openvino_line,
+            "# or ONNX Runtime, on any CPU (a Raspberry Pi too):",
+            f'# model = Detector(f"{{root}}/{at(onnx)}", backend="onnxruntime")',
+        ]
+    elif xml:
+        runtime_lines = [openvino_line]
+    else:
+        runtime_lines = [
+            f'model = Detector(f"{{root}}/{path}", backend="onnxruntime")   # any CPU']
     out += [
         "",
         "## Use it",
@@ -225,7 +249,7 @@ def model_card(facts: dict) -> str:
         "from easydetect import Detector",
         "",
         f'root = snapshot_download("{repo}", allow_patterns="{pattern}")',
-        f'model = Detector(f"{{root}}/{path}")      # device="CPU" / "GPU" / "NPU", default AUTO',
+        *runtime_lines,
         "",
         'for r in model("photo.jpg", conf=0.25):',
         "    for box, score, cls in zip(r.boxes.xyxy, r.boxes.conf, r.boxes.cls):",

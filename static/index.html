@@ -92,7 +92,7 @@
 
     <!-- ---------- training ---------- -->
     <div data-view="train" data-title="학습" hidden>
-      <div class="lead">COCO 가중치에서 시작해 내 데이터에 맞춰요. 끝나면 OpenVINO IR도 만들어 둬요.</div>
+      <div class="lead">COCO 가중치에서 시작해 내 데이터에 맞춰요. 끝나면 OpenVINO IR과 ONNX도 만들어 둬요.</div>
 
       <div class="empty" id="train-empty" hidden>
         상자를 그린 데이터셋이 아직 없어요.<br>
@@ -238,6 +238,7 @@
           <div class="menu-list">
             <button id="dl-weights">best.pt <span class="dim">PyTorch</span></button>
             <button id="dl-ir">OpenVINO IR <span class="dim">zip</span></button>
+            <button id="dl-onnx">ONNX <span class="dim">zip</span></button>
             <button id="dl-csv">results.csv</button>
             <button id="dl-log">로그</button>
             <button id="dl-pred">결과 이미지 zip</button>
@@ -803,13 +804,14 @@ function render(job) {
     cancel: ["queued", "running"].includes(job.status),
     evaluate: train && has("weights") && !active,
     resume: train && !active,
-    "dl-weights": has("weights"), "dl-ir": has("openvino"), "dl-csv": has("results"),
+    "dl-weights": has("weights"), "dl-ir": has("openvino"), "dl-onnx": has("onnx"),
+    "dl-csv": has("results"),
     "dl-log": has("log"), "dl-pred": has("predictions"), "dl-video": has("video"),
     register: train && has("weights") && !active,
     "delete-job": !live,
   };
   Object.entries(show).forEach(([id, on]) => { $(id).hidden = !on; });
-  $("downloads").hidden = !["dl-weights", "dl-ir", "dl-csv", "dl-log", "dl-pred", "dl-video"].some((id) => show[id]);
+  $("downloads").hidden = !["dl-weights", "dl-ir", "dl-onnx", "dl-csv", "dl-log", "dl-pred", "dl-video"].some((id) => show[id]);
   $("try-row").hidden = !(train && has("weights"));
 
   $("chart-box").hidden = !train;
@@ -978,6 +980,7 @@ function renderCode(job) {
   $("code-box").hidden = !(job.kind === "train" && path);
   if (!path) return;
   const ir = files.ir ? short(files.ir) : "best.xml";
+  const onnx = (job.artifacts || []).includes("onnx") ? ir.replace(/\.xml$/, ".onnx") : null;
   const snippets = {
     python: pythonSnippet(path),
     cli: `# ${T("이미지 · 폴더 · 영상 — 결과는 runs/detect/predict/")}
@@ -985,14 +988,16 @@ easydetect predict model="${path}" source=photo.jpg conf=0.25
 
 # ${T("웹캠 창으로 (q 또는 Esc로 종료)")}
 easydetect predict model="${path}" source=0 show=true save=false`,
-    elsewhere: `# 1) ${T`다운로드 → OpenVINO IR 로 zip을 받아 풀어요 (${ir} · .bin · labels.txt)`}
+    elsewhere: `# 1) ${T`다운로드 → OpenVINO IR 로 zip을 받아 풀어요 (${ir} · .bin · labels.txt)`}${onnx ? `
+#    ${T`라즈베리파이처럼 Intel이 아닌 PC는 다운로드 → ONNX zip (${onnx} · labels.txt)`}` : ""}
 # 2) ${T("그 PC에는 추론용만 설치해요 — PyTorch 없이 돼요")}
 pip install easydetect
 
 # 3) ${T("파이썬에서")}
 from easydetect import Detector
 
-model = Detector(r"job${job.id}-openvino/${ir}", device="AUTO")   # ${T('Intel NPU면 "NPU"')}
+model = Detector(r"job${job.id}-openvino/${ir}", device="AUTO")   # ${T('Intel NPU면 "NPU"')}${onnx ? `
+# ${T("ONNX zip이면")}: model = Detector(r"job${job.id}-onnx/${onnx}", backend="onnxruntime")` : ""}
 model.predict("photo.jpg", save=True)`,
   };
   press("#code-tabs button", (b) => b.dataset.code === codeTab);
@@ -1092,6 +1097,7 @@ $("resume").onclick = async () => {
 const download = (kind) => () => { $("downloads").open = false; location.assign(`/api/jobs/${current}/download/${kind}`); };
 $("dl-weights").onclick = download("weights");
 $("dl-ir").onclick = download("openvino");
+$("dl-onnx").onclick = download("onnx");
 $("dl-csv").onclick = download("results");
 $("dl-log").onclick = download("log");
 $("dl-pred").onclick = download("predictions");

@@ -1197,9 +1197,10 @@ def test_a_trained_run_writes_its_own_model_card(studio):
                  "COCO-pretrained", "8 training images (12 boxes), 2 validation images (3 boxes)",
                  "| 0 | rock | 12 | 3 |", "RTX 5090", "AdamW", "20.0M of 31.0M", "on (CUDA AMP)",
                  'allow_patterns="models/rock-paper-scissors/*"',
-                 "models/rock-paper-scissors/best.xml"):
+                 "models/rock-paper-scissors/best.xml", "- onnx",
+                 'Detector(f"{root}/models/rock-paper-scissors/best.onnx", backend="onnxruntime")',
+                 "| `best.onnx` | ONNX"):
         assert fact in readme, fact
-    assert "best.onnx" not in readme                      # the upload leaves it behind
 
     # the running job's panel reads the same record
     assert client.get(f"/api/jobs/{job}").json()["run"]["gpu"] == "NVIDIA GeForce RTX 5090"
@@ -1212,8 +1213,8 @@ def test_the_hugging_face_bundle_is_the_folder_to_upload(studio):
     response = client.get(f"/api/jobs/{job}/download/huggingface",
                           params={"repo": "me/models", "folder": "models/rps", "pt": True})
     names = sorted(zipfile.ZipFile(io.BytesIO(response.content)).namelist())
-    assert names == ["rps/README.md", "rps/best.bin", "rps/best.names.json", "rps/best.pt",
-                     "rps/best.xml", "rps/labels.txt"]
+    assert names == ["rps/README.md", "rps/best.bin", "rps/best.names.json", "rps/best.onnx",
+                     "rps/best.pt", "rps/best.xml", "rps/labels.txt"]
     readme = zipfile.ZipFile(io.BytesIO(response.content)).read("rps/README.md").decode()
     assert 'snapshot_download("me/models", allow_patterns="models/rps/*")' in readme
     assert "`best.pt`" in readme and "model.train(" in readme
@@ -1221,3 +1222,34 @@ def test_the_hugging_face_bundle_is_the_folder_to_upload(studio):
     # the plain IR download carries the card too
     ir = zipfile.ZipFile(io.BytesIO(client.get(f"/api/jobs/{job}/download/openvino").content))
     assert "README.md" in ir.namelist()
+
+
+def test_the_onnx_and_the_ir_download_apart(studio):
+    """One export folder, two zips: each runtime's files, the class names and a card."""
+    client, module = studio
+    job, _ = _finished_run(client, module)
+    assert {"openvino", "onnx"} <= set(client.get(f"/api/jobs/{job}").json()["artifacts"])
+
+    def unzip(kind):
+        response = client.get(f"/api/jobs/{job}/download/{kind}")
+        assert response.status_code == 200
+        assert f"job{job}-{kind}.zip" in response.headers["content-disposition"]
+        bundle = zipfile.ZipFile(io.BytesIO(response.content))
+        return sorted(bundle.namelist()), bundle.read("README.md").decode()
+
+    names, card = unzip("openvino")
+    assert names == ["README.md", "best.bin", "best.names.json", "best.xml", "labels.txt"]
+    assert "best.onnx" not in card and "- openvino" in card
+    names, card = unzip("onnx")
+    assert names == ["README.md", "best.names.json", "best.onnx", "labels.txt"]
+    assert "best.xml" not in card and "- openvino" not in card
+    assert 'best.onnx", backend="onnxruntime")' in card and "Raspberry Pi" in card
+
+
+def test_a_run_without_an_onnx_has_no_onnx_download(studio):
+    client, module = studio
+    job, run = _finished_run(client, module)
+    (run / "openvino" / "best.onnx").unlink()
+    assert "onnx" not in client.get(f"/api/jobs/{job}").json()["artifacts"]
+    assert client.get(f"/api/jobs/{job}/download/onnx").status_code == 404
+    assert client.get(f"/api/jobs/{job}/download/openvino").status_code == 200

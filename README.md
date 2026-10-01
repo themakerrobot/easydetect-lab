@@ -109,21 +109,24 @@ Button names below are the English ones.
    and auto-labelling drafts with the dataset's own latest run when it has one. *Webcam* opens the browser's camera and
    posts a frame every 400 ms, so you see the model on live video even when the
    server is somewhere else.
-8. **Take it away** — `best.pt`, the OpenVINO IR as a zip (exported when a run
-   finishes), `results.csv`. *Register model* gives the run a name (the IR if it has
+8. **Take it away** — `best.pt`, the OpenVINO IR as a zip and the ONNX as a
+   zip (both exported when a run finishes, each with `labels.txt`),
+   `results.csv`. The IR is for OpenVINO (Intel CPU, GPU, NPU); the ONNX runs on
+   ONNX Runtime on any CPU, a Raspberry Pi included
+   (`Detector("best.onnx", backend="onnxruntime")`), with the same boxes. *Register model* gives the run a name (the IR if it has
    one, otherwise the weights) and it then appears wherever a model is chosen —
    auto-labelling, batch inference, the webcam. A `.pt`, `.onnx` or IR (its
    `.xml` and `.bin` picked together) from elsewhere goes into the same list.
    *Use it in code* on a finished run gives Python, command-line and "another
-   PC" snippets with this run's paths filled in, ready to copy.
-9. **Share it** — the *Hugging Face* tab builds the folder to upload: the IR,
-   `labels.txt`, optionally `best.pt`, and a `README.md` model card written
+   PC" (OpenVINO or ONNX) snippets with this run's paths filled in, ready to copy.
+9. **Share it** — the *Hugging Face* tab builds the folder to upload: the IR, the
+   ONNX, `labels.txt`, optionally `best.pt`, and a `README.md` model card written
    from the run itself — classes with their train/val box counts (and AP if
    you evaluated), mAP, backbone, starting weights, the training settings and
    hardware, and download-and-run code pointing at the repo and folder you
    chose (by default the repo your weights come from, `models/<dataset>`).
-   It shows the `hf upload` command to run next. The plain IR zip carries the
-   same card.
+   It shows the `hf upload` command to run next. The IR and ONNX zips carry the
+   same card, written for the runtime inside.
 
 ![labelling](docs/labeling.jpg)
 
@@ -177,7 +180,7 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `POST /api/jobs/{id}/resume` | `{add_epochs}` — continue a finished run |
 | `POST /api/jobs/{id}/evaluate` | `{conf}` — queue a scoring pass with pictures |
 | `GET /api/jobs/{id}/report` · `/eval/{name}` | the numbers, and the pictures |
-| `GET /api/jobs/{id}/download/{weights,openvino,results,log,predictions,video}` | |
+| `GET /api/jobs/{id}/download/{weights,openvino,onnx,results,log,predictions,video}` | |
 | `GET /api/jobs/{id}/download/huggingface` | `?repo=&folder=&pt=` — the upload folder, zipped, with its README |
 | `GET /api/jobs/{id}/modelcard` | the README.md that bundle would carry, and where it would go |
 | `POST /api/jobs/{id}/predict` | multipart: `image`, `conf` → annotated JPEG |

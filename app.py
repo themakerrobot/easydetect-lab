@@ -921,16 +921,23 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
         if not path.exists():
             raise HTTPException(404, "no weights")
         return FileResponse(path, filename=f"job{job_id}-best.pt")
-    if kind == "openvino":
-        folder = run_dir / "openvino"
-        if not folder.is_dir():
-            raise HTTPException(404, "no exported IR")
-        archive = shutil.make_archive(str(run_dir / f"job{job_id}-openvino"), "zip", folder)
-        if job["kind"] == "train":           # the card travels with the model
-            files = sorted(p.name for p in folder.iterdir())
-            with zipfile.ZipFile(archive, "a") as bundle:
-                bundle.writestr("README.md", _card(job, repo, folder_in_repo, files))
-        return FileResponse(archive, filename=f"job{job_id}-openvino.zip")
+    if kind in ("openvino", "onnx"):
+        # one export folder holds both: the IR (.xml + .bin) and the .onnx it was
+        # converted from; each zip takes its own model files and the class names
+        model_files = (".xml", ".bin") if kind == "openvino" else (".onnx",)
+        files = [p for p in sorted((run_dir / "openvino").glob("*"))
+                 if p.suffix in model_files or p.name == "labels.txt"
+                 or p.name.endswith(".names.json")]
+        if not any(p.suffix in model_files for p in files):
+            raise HTTPException(404, "no exported IR" if kind == "openvino" else "no exported ONNX")
+        archive = run_dir / f"job{job_id}-{kind}.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for p in files:
+                bundle.write(p, p.name)
+            if job["kind"] == "train":       # the card travels with the model
+                bundle.writestr("README.md", _card(job, repo, folder_in_repo,
+                                                   [p.name for p in files]))
+        return FileResponse(archive, filename=f"job{job_id}-{kind}.zip")
     if kind == "huggingface":
         return _hub_bundle(job, repo, folder_in_repo, pt)
     if kind == "results":
@@ -1074,7 +1081,7 @@ def _card(job: dict, repo: str | None, folder: str | None, files: list[str]) -> 
 def _hub_files(job: dict, pt: bool) -> list[Path]:
     run_dir = Path(job["run_dir"])
     wanted = [p for p in sorted((run_dir / "openvino").glob("*"))
-              if p.suffix in (".xml", ".bin") or p.name == "labels.txt"
+              if p.suffix in (".xml", ".bin", ".onnx") or p.name == "labels.txt"
               or p.name.endswith(".names.json")]
     if pt and (run_dir / "weights" / "best.pt").exists():
         wanted.append(run_dir / "weights" / "best.pt")
@@ -1082,7 +1089,7 @@ def _hub_files(job: dict, pt: bool) -> list[Path]:
 
 
 def _hub_bundle(job: dict, repo: str | None, folder: str | None, pt: bool):
-    """The folder to upload as it is: the IR, its labels, the card — and best.pt if asked."""
+    """The folder to upload as it is: IR, ONNX, labels, the card — and best.pt if asked."""
     if job["kind"] != "train":
         raise HTTPException(400, "only a training run has a model to share")
     files = _hub_files(job, pt)
@@ -1564,8 +1571,10 @@ def _artifacts(job: dict) -> list[str]:
     found = []
     if (run_dir / "weights" / "best.pt").exists():
         found.append("weights")
-    if (run_dir / "openvino").is_dir():
+    if any((run_dir / "openvino").glob("*.xml")):
         found.append("openvino")
+    if any((run_dir / "openvino").glob("*.onnx")):
+        found.append("onnx")
     if (run_dir / "results.csv").exists():
         found.append("results")
     if (run_dir / "train.log").exists():
