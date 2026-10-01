@@ -208,7 +208,8 @@ def model_card(facts: dict) -> str:
     what = {
         f"{stem}.xml": "OpenVINO IR — the network",
         f"{stem}.bin": "OpenVINO IR — the weights",
-        f"{stem}.onnx": "ONNX — the same network, for ONNX Runtime",
+        f"{stem}.onnx": "ONNX — the same network with the class names inside: works alone, "
+                        "on ONNX Runtime or OpenVINO",
         "labels.txt": "class names, one per line (line number = class id)",
         f"{stem}.names.json": "the same names, keyed by id",
         "best.pt": "PyTorch checkpoint — to train further or export again",
@@ -228,7 +229,7 @@ def model_card(facts: dict) -> str:
     if xml and onnx:
         runtime_lines = [
             openvino_line,
-            "# or ONNX Runtime, on any CPU (a Raspberry Pi too):",
+            "# or the .onnx alone (it carries its class names), on ONNX Runtime — any CPU:",
             f'# model = Detector(f"{{root}}/{at(onnx)}", backend="onnxruntime")',
         ]
     elif xml:
