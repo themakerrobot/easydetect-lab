@@ -299,7 +299,6 @@ class Worker(threading.Thread):
         """
         import cv2
         import numpy as np
-
         from easydetect import Detector
         from easydetect.data.dataset import load_data_yaml
         from easydetect.plotting import draw_boxes
@@ -392,7 +391,6 @@ class Worker(threading.Thread):
         that holds every box, and the pair zips up for download.
         """
         import cv2
-
         from easydetect import Detector
         from easydetect.sources import SourceLoader
 

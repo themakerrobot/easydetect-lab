@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 from labeling import label_path, labels_beside, list_images, read_labels, write_labels
 
 BOXES = [{"cls": 0, "cx": 0.5, "cy": 0.4, "w": 0.2, "h": 0.3}]

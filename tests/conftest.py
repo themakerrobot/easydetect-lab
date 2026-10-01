@@ -1,5 +1,5 @@
 # Apache-2.0
-"""The platform's modules live beside it, not on the install path."""
+"""The lab's modules live beside the tests, not on the install path."""
 
 from __future__ import annotations
 

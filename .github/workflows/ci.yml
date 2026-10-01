@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"      # weekly, so a change on easydetect's main shows up here
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # release: what users get from requirements.txt
+        # main: easydetect's next release, so a change there that breaks the lab
+        #       is seen before it reaches PyPI
+        easydetect: [release, main]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt pytest httpx ruff
+          if [ "${{ matrix.easydetect }}" = main ]; then
+            pip install "easydetect[train] @ git+https://github.com/themakerrobot/easydetect@main"
+          fi
+          python -c "import easydetect; print('easydetect', easydetect.__version__)"
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: pytest -q
+
+  design-kit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The themaker-ui copy matches the kit
+        run: |
+          curl -sSfL -o /tmp/kit.css \
+            https://raw.githubusercontent.com/themakerrobot/themaker-ui/v1.0.0/themaker-ui.css
+          diff -u /tmp/kit.css static/css/themaker-ui.css

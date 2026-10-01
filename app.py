@@ -1,11 +1,11 @@
 # Apache-2.0
-"""easydetect platform — label, train, watch, download, in a browser.
+"""easydetect lab — label, train, watch, download, in a browser.
 
-    pip install -r platform/requirements.txt
-    python platform/run.py                 # http://127.0.0.1:8080
+    pip install -r requirements.txt
+    python run.py                          # http://127.0.0.1:8080
 
-One process, one SQLite file, one folder (``easydetect-platform/`` where you start
-it; ``--data`` or ``$EASYDETECT_PLATFORM_HOME`` moves it). It is built for a single
+One process, one SQLite file, one folder (``easydetect-lab/`` where you start
+it; ``--data`` or ``$EASYDETECT_LAB_HOME`` moves it). It is built for a single
 box — a workstation, a mini PC beside a line — where the data must not leave the
 machine and there is nobody to run a queue broker. Users, permissions and
 schedulers are deliberately absent; see the README for what to do when you need
@@ -27,10 +27,12 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 import yaml
-from db import Database
+from easydetect.data.labels import label_path as shared_label_path
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+from db import Database
 from labeling import (
     IMG_SUFFIXES,
     label_path,
@@ -43,16 +45,16 @@ from labeling import (
 from modelcard import model_card, slug
 from worker import Worker
 
-from easydetect.data.labels import label_path as shared_label_path
-
 ROOT = Path(__file__).resolve().parent
-DATA = Path(os.environ.get("EASYDETECT_PLATFORM_HOME",
-                           Path.cwd() / "easydetect-platform")).expanduser()
+# EASYDETECT_PLATFORM_HOME: the name from when the lab was the package's platform/ folder
+DATA = Path(os.environ.get("EASYDETECT_LAB_HOME") or os.environ.get("EASYDETECT_PLATFORM_HOME")
+            or Path.cwd() / "easydetect-lab").expanduser()
 DATASETS, RUNS = DATA / "datasets", DATA / "runs"
 
-db = Database(DATA / "platform.db")
+# a data folder from the platform/ days keeps its database file name
+db = Database(DATA / "platform.db" if (DATA / "platform.db").exists() else DATA / "lab.db")
 worker = Worker(db, RUNS)
-app = FastAPI(title="easydetect platform")
+app = FastAPI(title="easydetect lab")
 # the themaker-ui design kit and its fonts; the pages link them relatively
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 _models: dict[str, object] = {}
@@ -75,7 +77,7 @@ def _start() -> None:
         folder.mkdir(parents=True, exist_ok=True)
     reaped = worker.reap_stale()
     if reaped:
-        print(f"[platform] {reaped} job(s) were left running by a previous process")
+        print(f"[lab] {reaped} job(s) were left running by a previous process")
     if not worker.is_alive():
         worker.start()
 
@@ -848,7 +850,7 @@ def delete_job(job_id: int):
                                          " 모델 탭에서 먼저 빼 주세요")
     removed = False
     if removes and run_dir.resolve().is_relative_to(RUNS.resolve()) and run_dir.is_dir():
-        shutil.rmtree(run_dir, ignore_errors=True)   # only ever inside the platform's runs/
+        shutil.rmtree(run_dir, ignore_errors=True)   # only ever inside the lab's runs/
         removed = True
     for gone in ids:
         (RUNS / f"job{gone}-failed.log").unlink(missing_ok=True)
@@ -1447,7 +1449,8 @@ def _split_lists(dataset: dict, arcname: dict[Path, PurePosixPath]) -> dict[str,
     absolute paths written for this machine — it leaves as relative paths
     inside the zip. Nothing, rather than a wrong split, when it cannot be read.
     """
-    from easydetect.data.dataset import _list_images, load_data_yaml
+    from easydetect.data.dataset import list_images as split_images
+    from easydetect.data.dataset import load_data_yaml
 
     yaml_file = Path(dataset["path"]) / "data.yaml"
     if not yaml_file.exists():
@@ -1458,7 +1461,7 @@ def _split_lists(dataset: dict, arcname: dict[Path, PurePosixPath]) -> dict[str,
         for split in ("train", "val"):
             if cfg[split] is None:
                 return {}
-            files = _list_images(cfg["root"], cfg[split], cfg["yaml_dir"])
+            files = split_images(cfg["root"], cfg[split], cfg["yaml_dir"])
             out[split] = [str(arcname[f.resolve()]) for f in files if f.resolve() in arcname]
     except (OSError, ValueError, KeyError):
         return {}

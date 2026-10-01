@@ -1,5 +1,5 @@
 # Apache-2.0
-"""SQLite for the platform: datasets, jobs, and one row per training epoch.
+"""SQLite for the lab: datasets, jobs, and one row per training epoch.
 
 One file, no server to run. A single-box tool does not need Postgres, and
 anything that outgrows this file wants a real queue anyway.

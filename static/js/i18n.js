@@ -1,4 +1,4 @@
-// easydetect platform — 한국어 / English.
+// easydetect lab — 한국어 / English.
 //
 // Korean is the source text; English comes from EN below. Text in the page
 // (markup, or HTML that script writes) is swapped whole: a text node or a
@@ -154,7 +154,7 @@
 
     // label page
     "상자 그리기 — easydetect": "Draw boxes — easydetect", "{0} — 상자 그리기": "{0} — draw boxes",
-    "플랫폼으로": "Back to the platform", "클래스 추가": "Add a class", "추가": "Add", "폴더별로 보기": "Show one folder",
+    "데이터 목록으로": "Back to the datasets", "클래스 추가": "Add a class", "추가": "Add", "폴더별로 보기": "Show one folder",
     "상자 없는 것만 보기": "Only images without boxes", "이전 (←)": "Previous (←)", "이전": "Previous",
     "다음 (→)": "Next (→)", "다음": "Next", "모델이 상자 초안을 그려요": "A model drafts the boxes",
     "이전 이미지의 상자를 그대로 가져와요 (C)": "Copy the previous image's boxes (C)", "이전 상자 복사": "Copy previous boxes",

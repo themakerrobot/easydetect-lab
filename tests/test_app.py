@@ -1,5 +1,5 @@
 # Apache-2.0
-"""The platform API: datasets, labels, jobs — and the guards around them."""
+"""The lab's API: datasets, labels, jobs — and the guards around them."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 @pytest.fixture
 def studio(tmp_path, monkeypatch):
-    """A platform rooted in a temp folder, with the worker left asleep."""
-    monkeypatch.setenv("EASYDETECT_PLATFORM_HOME", str(tmp_path / "home"))
+    """A lab rooted in a temp folder, with the worker left asleep."""
+    monkeypatch.setenv("EASYDETECT_LAB_HOME", str(tmp_path / "home"))
     import app as module
 
     module = importlib.reload(module)
@@ -58,7 +58,7 @@ def upload(client, files, name="set"):
 
 def test_the_pages_are_served(studio):
     client, _ = studio
-    assert "easydetect platform" in client.get("/").text
+    assert "easydetect lab" in client.get("/").text
 
     upload(client, {"images/a.jpg": image_bytes(), "labels/a.txt": b"0 .5 .5 .2 .2\n"})
     assert "<canvas" in client.get("/label/1").text
@@ -1067,6 +1067,7 @@ def test_startup_runs_once_per_process(studio):
 def test_a_certificate_is_made_once_and_reused(tmp_path):
     pytest.importorskip("cryptography")
     from cryptography import x509
+
     from tls import ensure_certificate
 
     cert, key = ensure_certificate(tmp_path / "tls")

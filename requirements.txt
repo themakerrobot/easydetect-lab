@@ -1,6 +1,6 @@
-# unpinned on purpose: a pin made pip swap a clone's `pip install -e .` for the
-# PyPI release; run.py checks the version it actually imports instead
-easydetect[train]
+# the lab runs on the PyPI release of easydetect; run.py also checks the version
+# it actually imports, which can differ from pip's records for an editable install
+easydetect[train]>=0.2.1
 fastapi>=0.110
 uvicorn[standard]>=0.27
 python-multipart>=0.0.9

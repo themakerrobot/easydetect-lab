@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # Apache-2.0
-"""Start the platform.
+"""Start the lab.
 
-    python platform/run.py                                   # the web app
-    python platform/run.py label --source images/ --names can,bottle
+    python run.py                                            # the web app
+    python run.py label --source images/ --names can,bottle
 
 The second form registers a folder already on this machine and opens the
 labelling page on it — the quick path when all you want is to draw boxes.
@@ -33,7 +33,7 @@ def _serve_https(application, uvicorn, args, local: str, path: str) -> None:
     try:
         cert, key = ensure_certificate(application.DATA / "tls")
     except Exception as exc:  # no or broken cryptography: HTTP still works
-        print(f"[platform] HTTPS off ({type(exc).__name__}: {exc}); "
+        print(f"[lab] HTTPS off ({type(exc).__name__}: {exc}); "
               f"pip install -U cryptography serves it — the webcam needs it")
         return
     os.environ["EASYDETECT_HTTPS_PORT"] = str(args.https_port)
@@ -42,22 +42,22 @@ def _serve_https(application, uvicorn, args, local: str, path: str) -> None:
         ssl_certfile=str(cert), ssl_keyfile=str(key),
     )
     threading.Thread(target=uvicorn.Server(config).run, daemon=True, name="https").start()
-    print(f"[platform] https://{local}:{args.https_port}{path}  (for the webcam; "
+    print(f"[lab] https://{local}:{args.https_port}{path}  (for the webcam; "
           f"the browser warns once about the certificate)")
 
 
-#: The oldest easydetect this platform works with. Checked against the code that is
+#: The oldest easydetect this lab works with. Checked against the code that is
 #: actually imported — an editable install's metadata can lag behind a git pull.
-EASYDETECT_AT_LEAST = "0.2.0"
+EASYDETECT_AT_LEAST = "0.2.1"
 
 
 def _which_easydetect(file: str) -> str:
     """Say which easydetect a path belongs to: an installed package, or a source tree.
 
-    The platform sits in the package's repository but runs on whatever
-    easydetect pip installed, normally the PyPI release. Only an editable
-    install (``pip install -e``) or a PYTHONPATH points it at the clone's
-    own ``easydetect/`` folder; this line makes the difference visible.
+    The lab runs on whatever easydetect pip installed, normally the PyPI
+    release. An editable install (``pip install -e`` in a clone of easydetect)
+    or a PYTHONPATH points it at that clone's code instead, released or not;
+    this line makes the difference visible.
     """
     where = Path(file).resolve().parent
     if {"site-packages", "dist-packages"} & set(where.parts):
@@ -69,13 +69,13 @@ def _check_easydetect() -> str:
     try:
         import easydetect
     except ImportError:
-        raise SystemExit('easydetect is not installed: pip install -r platform/requirements.txt '
+        raise SystemExit('easydetect is not installed: pip install -r requirements.txt '
                          '(or pip install "easydetect[train]")') from None
     have = tuple(int(x) for x in easydetect.__version__.split(".")[:3])
     need = tuple(int(x) for x in EASYDETECT_AT_LEAST.split("."))
     if have < need:
         raise SystemExit(
-            f"the platform needs easydetect >= {EASYDETECT_AT_LEAST}, "
+            f"the lab needs easydetect >= {EASYDETECT_AT_LEAST}, "
             f"found {easydetect.__version__} at "
             f"{Path(easydetect.__file__).parent}.\n"
             f'  pip install -U "easydetect[train]"      # or, in a clone: pip install -e ".[train]"'
@@ -102,11 +102,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.data:
-        os.environ["EASYDETECT_PLATFORM_HOME"] = str(Path(args.data).expanduser())
+        os.environ["EASYDETECT_LAB_HOME"] = str(Path(args.data).expanduser())
 
-    print(f"[platform] {_check_easydetect()}")
-    import app as application
+    print(f"[lab] {_check_easydetect()}")
     import uvicorn
+
+    import app as application
 
     # 0.0.0.0 is where the server listens, not an address a browser can open
     local = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
@@ -124,10 +125,10 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         path = f"/label/{dataset['id']}"
-        print(f"[platform] {dataset['images']} images, {dataset['labelled']} already labelled")
+        print(f"[lab] {dataset['images']} images, {dataset['labelled']} already labelled")
 
     where = "  (other machines: this one's IP)" if local != args.host else ""
-    print(f"[platform] {url}{path}{where}")
+    print(f"[lab] {url}{path}{where}")
     if args.https_port:
         _serve_https(application, uvicorn, args, local, path)
     if not args.no_browser:

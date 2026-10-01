@@ -1,5 +1,5 @@
 # Apache-2.0
-"""A self-signed certificate, so the platform can also be served over HTTPS.
+"""A self-signed certificate, so the lab can also be served over HTTPS.
 
 Browsers hand a page the camera only on https:// or localhost. Opened from
 another machine by IP, the webcam preview needs HTTPS; a certificate made here
@@ -31,7 +31,7 @@ def ensure_certificate(folder: Path) -> tuple[Path, Path]:
     from cryptography.x509.oid import NameOID
 
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "easydetect platform")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "easydetect lab")])
     now = datetime.datetime.now(datetime.timezone.utc)
     names = [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
     host = socket.gethostname()

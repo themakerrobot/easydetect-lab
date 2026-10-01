@@ -1,33 +1,31 @@
-# easydetect platform
+# easydetect lab
 
 Label images, train on them, watch the run, take the model away — in a browser,
-on one machine. It is a separate application that uses the `easydetect` package; the
-package itself stays a library with a CLI and no web dependencies.
+on one machine. It runs on [easydetect](https://github.com/themakerrobot/easydetect),
+the detection package, installed from PyPI; this repository is only the app.
 
 ```bash
-pip install -r platform/requirements.txt   # easydetect[train] from PyPI, and the web server
-python platform/run.py                 # http://<this machine>:8080, from any machine
+git clone https://github.com/themakerrobot/easydetect-lab
+cd easydetect-lab
+pip install -r requirements.txt   # easydetect[train] from PyPI, and the web server
+python run.py                     # http://<this machine>:8080, from any machine
 ```
 
-`easydetect[train]` alone does not bring the web server (FastAPI, uvicorn);
-`platform/requirements.txt` adds it.
-
-The platform lives in the package's repository but runs on the easydetect that
-pip installed — the PyPI release — not on the `easydetect/` folder beside it.
-Platform changes arrive with `git pull`; package changes with
-`pip install -U "easydetect[train]"`. The first line `run.py` prints says which
-one it found:
+`pip install "easydetect[train]"` alone does not bring the web server
+(FastAPI, uvicorn); `requirements.txt` adds it. Lab changes arrive with
+`git pull`, package changes with `pip install -U "easydetect[train]"`. The
+first line `run.py` prints says which easydetect it found:
 
 ```
-[platform] easydetect 0.2.0: installed package at .../site-packages/easydetect
+[lab] easydetect 0.2.1: installed package at .../site-packages/easydetect
 ```
 
-`editable install` there means a `pip install -e .` in this clone: the platform
-then runs on the clone's own code, released or not — what you want while
+`editable install` there means a `pip install -e` of an easydetect clone: the
+lab then runs on that clone's code, released or not — what you want while
 changing the package, and only then. `pip uninstall easydetect` and
-`pip install -r platform/requirements.txt` go back to the release.
+`pip install -r requirements.txt` go back to the release.
 
-![the platform](../docs/assets/platform.jpg)
+![the lab](docs/lab.jpg)
 
 [PLAN.md](PLAN.md) is what this is meant to become, and what is missing today.
 
@@ -46,7 +44,7 @@ Button names below are the English ones.
 1. **Collect** — four ways into a dataset, and all of them can add to one that
    already exists: pick image files, upload a video and sample frames from it
    (interval and cap are yours), upload a zip, or register a folder already on
-   this machine (`python platform/run.py label --source photos/ --names can,bottle`).
+   this machine (`python run.py label --source photos/ --names can,bottle`).
    A YOLO-format export from a labelling service goes in as the zip it
    downloaded as — Roboflow's *YOLOv8* / *YOLOv11* TXT, say — with its classes,
    labels and train/valid split kept; *Statistics* and *Draw boxes* show it straight away.
@@ -127,16 +125,16 @@ Button names below are the English ones.
    It shows the `hf upload` command to run next. The plain IR zip carries the
    same card.
 
-![labelling](../docs/assets/labeling.jpg)
+![labelling](docs/labeling.jpg)
 
 ## Where things live
 
-Everything sits under `easydetect-platform/` in the directory you start from —
-`--data /some/path` or `$EASYDETECT_PLATFORM_HOME` moves it:
+Everything sits under `easydetect-lab/` in the directory you start from —
+`--data /some/path` or `$EASYDETECT_LAB_HOME` moves it:
 
 ```
-easydetect-platform/
-  platform.db          datasets, jobs, per-epoch numbers
+easydetect-lab/
+  lab.db               datasets, jobs, per-epoch numbers
   datasets/<name>/     uploaded datasets (registered folders stay where they are)
   runs/job<id>/        weights/, openvino/, results.csv, summary.json
                        (inference jobs: images/, results.json, annotated.mp4)
@@ -207,11 +205,35 @@ Other limits worth knowing:
   `--host 127.0.0.1` keeps it to this machine. Browsers only allow the webcam
   on `https://` or `localhost`, so the same app is also served over HTTPS on
   8443 (`--https-port`, 0 turns it off) with a certificate made on first start
-  and kept in `easydetect-platform/tls/`. The browser warns about it once; the
+  and kept in `easydetect-lab/tls/`. The browser warns about it once; the
   webcam tab opened over `http://` links to the HTTPS address.
 
 ## Tests
 
 ```bash
-pytest platform/tests
+pip install pytest httpx
+pytest
 ```
+
+## From the platform/ folder
+
+The lab used to be `platform/` inside the easydetect repository (up to
+easydetect 0.2.0), and its data folder was `easydetect-platform/`. The
+database records datasets and runs by absolute path, so leave that folder
+where it is and point the lab at it:
+
+```bash
+python run.py --data ~/path/to/easydetect-platform
+```
+
+`$EASYDETECT_PLATFORM_HOME` still works too, and a data folder from then keeps
+its `platform.db`.
+
+## 한국어
+
+브라우저에서 라벨링 → 학습 → 평가 → 추론 → 배포까지 하는 앱입니다. 검출
+패키지 [easydetect](https://github.com/themakerrobot/easydetect)는 PyPI에서
+받아 쓰고, 이 저장소에는 앱만 있습니다. `pip install -r requirements.txt` 후
+`python run.py`. 앱 업데이트는 `git pull`, 패키지 업데이트는
+`pip install -U "easydetect[train]"`입니다. 예전 `platform/` 시절 데이터는
+`python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.
