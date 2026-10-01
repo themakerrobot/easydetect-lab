@@ -67,6 +67,11 @@ def _tail(path: Path, lines: int = 8) -> str:
     return " / ".join(text[-lines:])[:600]
 
 
+def _box_filters(job) -> dict:
+    """An inference job's overlap filters, as ``predict()`` takes them; unset ones stay out."""
+    return {key: job[key] for key in ("iou", "contain") if job.get(key) is not None}
+
+
 def _optimizer_kwargs(job) -> dict:
     """The run's optimizer settings as ``train()`` takes them; unset ones stay out."""
     names = {"lr": "lr0", "lr_backbone_mult": "lr_backbone_mult",
@@ -359,7 +364,8 @@ class Worker(threading.Thread):
                 conf=False,
                 color=(110, 220, 60),  # truth is always green, whatever the class
             )
-            result = model.predict(str(image_path), conf=conf, verbose=False)[0]
+            result = model.predict(str(image_path), conf=conf, verbose=False,
+                                   **_box_filters(job))[0]
             painted = draw_boxes(painted, result.boxes, result.names)
             cv2.imwrite(str(out / f"{i:04d}_{image_path.stem}.jpg"), painted)
             cards.append(
@@ -423,7 +429,8 @@ class Worker(threading.Thread):
             for i, frame in enumerate(loader, start=1):
                 if job_id in self.cancelled:
                     raise Cancelled()
-                result = model.predict(frame.img, conf=conf, verbose=False)[0]
+                result = model.predict(frame.img, conf=conf, verbose=False,
+                                       **_box_filters(job))[0]
                 painted = result.plot()
                 found += len(result.boxes)
                 for c in result.boxes.cls:

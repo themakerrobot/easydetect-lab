@@ -48,7 +48,7 @@ def _serve_https(application, uvicorn, args, local: str, path: str) -> None:
 
 #: The oldest easydetect this lab works with. Checked against the code that is
 #: actually imported — an editable install's metadata can lag behind a git pull.
-EASYDETECT_AT_LEAST = "0.2.2"
+EASYDETECT_AT_LEAST = "0.2.3"
 
 
 def _which_easydetect(file: str) -> str:

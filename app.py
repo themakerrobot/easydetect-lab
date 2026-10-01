@@ -570,6 +570,27 @@ def delete_model(model_id: int):
     return {"deleted": True}
 
 
+def _box_filters(iou: str | None, contain: str | None) -> dict:
+    """The overlap filters a prediction asked for, as ``predict()`` takes them.
+
+    ``iou`` is the NMS threshold (1 turns it off, since no IoU exceeds 1);
+    ``contain`` merges a box lying inside another of its class (empty: off).
+    Left out, each stays at easydetect's default.
+    """
+    out = {}
+    for key, value in (("iou", iou), ("contain", contain)):
+        if value in (None, ""):
+            continue
+        try:
+            value = float(value)
+        except ValueError:
+            raise HTTPException(400, f"{key} must be a number") from None
+        if not 0 < value <= 1:
+            raise HTTPException(400, f"{key} must be above 0 and at most 1")
+        out[key] = value
+    return out
+
+
 @app.post("/api/predict")
 async def batch_predict(
     model: str = Form(...),
@@ -577,6 +598,8 @@ async def batch_predict(
     dataset_id: int = Form(None),
     path: str = Form(None),
     video: UploadFile = None,
+    iou: str = Form(None),
+    contain: str = Form(None),
 ):
     """Queue a run over a dataset, a folder on this machine, or an uploaded video."""
     if video is not None:
@@ -592,12 +615,14 @@ async def batch_predict(
             raise HTTPException(400, f"{source} does not exist")
     else:
         raise HTTPException(400, "give a dataset, a path, or a video")
+    filters = _box_filters(iou, contain)
     job_id = db.add_job(
         kind="predict",
         dataset_id=dataset_id or 0,
         model=_resolve_model(model),
         conf=conf,
         source=str(source),
+        **filters,
     )
     return {"id": job_id}
 
@@ -1180,8 +1205,10 @@ async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.25
 
 
 @app.post("/api/preview")
-async def preview(model: str = Form(...), conf: float = Form(0.35), image: UploadFile = None):
+async def preview(model: str = Form(...), conf: float = Form(0.35), image: UploadFile = None,
+                  iou: str = Form(None), contain: str = Form(None)):
     """One frame in, one annotated frame out — what the webcam preview posts to."""
+    filters = _box_filters(iou, contain)
     import cv2
     import numpy as np
 
@@ -1191,7 +1218,7 @@ async def preview(model: str = Form(...), conf: float = Form(0.35), image: Uploa
     if frame is None:
         raise HTTPException(400, "could not read that image")
     try:
-        result = _model(_resolve_model(model))(frame, conf=conf, verbose=False)[0]
+        result = _model(_resolve_model(model))(frame, conf=conf, verbose=False, **filters)[0]
     except Exception as exc:
         raise HTTPException(503, str(exc)) from exc
     ok, buffer = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 80])

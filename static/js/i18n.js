@@ -55,6 +55,12 @@
     "목표": "Goal", "빠르게": "Fast", "균형": "Balanced", "정확하게": "Accurate",
     "시작 모델": "Start from", "n 가장 가벼움 · s 기본 · m · l · x 가장 정확": "n lightest · s default · m · l · x most accurate",
     "비워 두면 easydetect가 정해요.": "Left empty, easydetect decides.",
+    "겹친 상자 정리 (IoU)": "Overlapping boxes (IoU)", "끄기": "off",
+    "이만큼 넘게 겹친 상자는 점수 높은 것 하나만 남겨요. 1이면 꺼요.":
+      "Boxes overlapping more than this keep only the highest score. 1 turns it off.",
+    "같은 물체의 조각 상자 합치기": "Merge pieces of one object",
+    "가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요.":
+      "When a half hidden object comes back as the whole and its pieces, a box with over 80% of it inside another of its class is merged into one.",
     "학습률": "Learning rate", "자동: 배치 {0} → {1}": "auto: batch {0} → {1}",
     "백본 학습률 비율": "Backbone learning-rate share",
     "학습률에 곱해요. 자동은 모델 크기별 (n·s 0.5, m 0.1, l 0.05, x 0.01)":

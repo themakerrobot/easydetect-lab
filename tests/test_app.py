@@ -582,6 +582,49 @@ def test_the_preview_endpoint_refuses_what_it_cannot_read(studio):
     assert unreadable.status_code == 400
 
 
+def test_the_overlap_filters_reach_predict(studio, tmp_path, monkeypatch):
+    """The webcam's IoU slider and merge box arrive as predict()'s iou and contain."""
+    client, module = studio
+    seen = []
+
+    class Fake:
+        def __call__(self, frame, **kwargs):
+            seen.append(kwargs)
+
+            class Result:
+                def plot(self):
+                    return frame
+
+                def summary(self):
+                    return []
+            return [Result()]
+
+    monkeypatch.setattr(module, "_model", lambda name: Fake())
+    frame = {"image": ("f.jpg", image_bytes(), "image/jpeg")}
+    for data, expected in (({}, {}), ({"iou": "0.5"}, {"iou": 0.5}),
+                           ({"iou": "1", "contain": "0.8"}, {"iou": 1.0, "contain": 0.8})):
+        seen.clear()
+        response = client.post("/api/preview", data={"model": "dfine-s", **data}, files=frame)
+        assert response.status_code == 200, response.text
+        assert {k: seen[0][k] for k in ("iou", "contain") if k in seen[0]} == expected
+    for bad in ({"iou": "0"}, {"contain": "1.5"}, {"iou": "loose"}):
+        response = client.post("/api/preview", data={"model": "dfine-s", **bad}, files=frame)
+        assert response.status_code == 400, bad
+
+    # a batch run keeps them for the worker
+    folder = tmp_path / "shift"
+    folder.mkdir()
+    (folder / "a.jpg").write_bytes(image_bytes())
+    job = client.post("/api/predict", data={"model": "dfine-s", "path": str(folder),
+                                            "iou": "0.6", "contain": "0.8"}).json()["id"]
+    row = module.db.one("SELECT iou, contain FROM jobs WHERE id = ?", (job,))
+    assert row == {"iou": 0.6, "contain": 0.8}
+
+    from worker import _box_filters
+    assert _box_filters(row) == {"iou": 0.6, "contain": 0.8}
+    assert _box_filters({"iou": None, "contain": None}) == {} == _box_filters({})
+
+
 def test_a_job_without_a_dataset_still_shows_in_the_list(studio, tmp_path):
     """Inference over a folder belongs to no dataset; the list must still have it."""
     client, _ = studio
