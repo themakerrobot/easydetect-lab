@@ -669,6 +669,7 @@ async def batch_predict(
     video: UploadFile = None,
     iou: str = Form(None),
     contain: str = Form(None),
+    segment: str = Form(None),
 ):
     """Queue a run over a dataset, a folder on this machine, or an uploaded video."""
     if video is not None:
@@ -691,6 +692,7 @@ async def batch_predict(
         model=_resolve_model(model),
         conf=conf,
         source=str(source),
+        task="segment" if _task(segment) == "segment" else None,
         **filters,
     )
     return {"id": job_id}
@@ -1275,7 +1277,7 @@ async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)
 
 @app.post("/api/preview")
 async def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile = None,
-                  iou: str = Form(None), contain: str = Form(None)):
+                  iou: str = Form(None), contain: str = Form(None), segment: str = Form(None)):
     """One frame in, one annotated frame out — what the webcam preview posts to."""
     filters = _box_filters(iou, contain)
     import cv2
@@ -1287,7 +1289,8 @@ async def preview(model: str = Form(...), conf: float = Form(0.5), image: Upload
     if frame is None:
         raise HTTPException(400, "could not read that image")
     try:
-        result = _model(_resolve_model(model))(frame, conf=conf, verbose=False, **filters)[0]
+        result = _model(_resolve_model(model), _task(segment))(
+            frame, conf=conf, verbose=False, **filters)[0]
     except Exception as exc:
         raise HTTPException(503, str(exc)) from exc
     ok, buffer = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -1467,13 +1470,19 @@ def _resolve_model(name: str) -> str:
     return row["path"] if row else text
 
 
-def _model(name: str):
-    """Compiled models are expensive; keep one per name for the session."""
+def _model(name: str, task: str = "detect"):
+    """Compiled models are expensive; keep one per name (and task) for the session."""
     from easydetect import Detector
 
-    if name not in _models:
-        _models[name] = Detector(name, verbose=False)
-    return _models[name]
+    key = f"{task}:{name}"
+    if key not in _models:
+        _models[key] = Detector(name, verbose=False, task=task)
+    return _models[key]
+
+
+def _task(segment: str | None) -> str:
+    """The form's "outline objects" box: masks with every box, or boxes alone."""
+    return "segment" if str(segment or "").lower() in ("1", "true", "on", "yes") else "detect"
 
 
 def _register(name: str, root: Path, names: list[str] | None = None) -> dict:

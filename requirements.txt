@@ -1,6 +1,6 @@
 # the lab runs on the PyPI release of easydetect; run.py also checks the version
 # it actually imports, which can differ from pip's records for an editable install
-easydetect[train]>=0.2.3
+easydetect[train]>=0.4.0
 fastapi>=0.110
 uvicorn[standard]>=0.27
 python-multipart>=0.0.9

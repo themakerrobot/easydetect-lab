@@ -75,7 +75,9 @@ ADDED_JOB_COLUMNS = {"patience": "INTEGER", "augment": "INTEGER",
                      "lr": "REAL", "lr_backbone_mult": "REAL", "weight_decay": "REAL",
                      "warmup_epochs": "REAL", "seed": "INTEGER", "amp": "INTEGER",
                      # an inference job's box filters; NULL: easydetect's defaults
-                     "iou": "REAL", "contain": "REAL"}
+                     "iou": "REAL", "contain": "REAL",
+                     # "segment": masks for every box (MobileSAM); NULL: boxes only
+                     "task": "TEXT"}
 
 
 class Database:

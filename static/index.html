@@ -171,7 +171,9 @@
           <output id="run-iou-out">0.70</output></div>
         <div class="hint">이만큼 넘게 겹친 상자는 점수 높은 것 하나만 남겨요. 1이면 꺼요.</div>
         <label class="check" style="margin-top:8px"><input type="checkbox" id="run-contain"> 같은 물체의 조각 상자 합치기</label>
-        <div class="hint">가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요. 그런 장면에서만 켜요: 겹쳐 있는 진짜 물체(군중, 책장)도 지워서 평균으로는 손해예요.</div></div>
+        <div class="hint">가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요. 그런 장면에서만 켜요: 겹쳐 있는 진짜 물체(군중, 책장)도 지워서 평균으로는 손해예요.</div>
+        <label class="check" style="margin-top:8px"><input type="checkbox" id="run-segment"> 물체 윤곽 칠하기 (세그멘테이션)</label>
+        <div class="hint">상자마다 MobileSAM이 물체 모양을 칠해요. 내 데이터로 학습한 모델도 마스크 라벨 없이 돼요. 처음 한 번 44MB를 받고, CPU에서는 사진마다 0.2초쯤 더 걸려요.</div></div>
       <div class="field"><div class="pb-label">대상</div>
         <div class="row seg full" id="run-tabs">
           <button class="db on" data-run="dataset" aria-pressed="true">데이터셋</button>
@@ -1199,6 +1201,7 @@ $("run-iou").oninput = () => {
 const addBoxFilters = (form) => {
   form.append("iou", $("run-iou").value);
   if ($("run-contain").checked) form.append("contain", "0.8");
+  if ($("run-segment").checked) form.append("segment", "1");
 };
 
 $("run-start").onclick = async () => {

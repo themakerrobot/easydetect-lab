@@ -599,7 +599,13 @@ def test_the_overlap_filters_reach_predict(studio, tmp_path, monkeypatch):
                     return []
             return [Result()]
 
-    monkeypatch.setattr(module, "_model", lambda name: Fake())
+    tasks = []
+
+    def fake_model(name, task="detect"):
+        tasks.append(task)
+        return Fake()
+
+    monkeypatch.setattr(module, "_model", fake_model)
     frame = {"image": ("f.jpg", image_bytes(), "image/jpeg")}
     for data, expected in (({}, {}), ({"iou": "0.5"}, {"iou": 0.5}),
                            ({"iou": "1", "contain": "0.8"}, {"iou": 1.0, "contain": 0.8})):
@@ -623,6 +629,63 @@ def test_the_overlap_filters_reach_predict(studio, tmp_path, monkeypatch):
     from worker import _box_filters
     assert _box_filters(row) == {"iou": 0.6, "contain": 0.8}
     assert _box_filters({"iou": None, "contain": None}) == {} == _box_filters({})
+
+
+def test_the_outline_box_asks_for_masks(studio, tmp_path, monkeypatch):
+    """Ticking "outline objects" loads the model with task="segment", live and in a batch."""
+    client, module = studio
+    tasks = []
+
+    class Fake:
+        def __call__(self, frame, **kwargs):
+            class Result:
+                def plot(self):
+                    return frame
+
+                def summary(self):
+                    return []
+            return [Result()]
+
+    def fake_model(name, task="detect"):
+        tasks.append(task)
+        return Fake()
+
+    monkeypatch.setattr(module, "_model", fake_model)
+    frame = {"image": ("f.jpg", image_bytes(), "image/jpeg")}
+    for data in ({}, {"segment": "1"}, {"segment": "0"}):
+        response = client.post("/api/preview", data={"model": "dfine-s", **data}, files=frame)
+        assert response.status_code == 200, response.text
+    assert tasks == ["detect", "segment", "detect"]
+
+    folder = tmp_path / "shift"
+    folder.mkdir()
+    (folder / "a.jpg").write_bytes(image_bytes())
+    plain = client.post("/api/predict", data={"model": "dfine-s", "path": str(folder)}).json()
+    masked = client.post("/api/predict", data={"model": "dfine-s", "path": str(folder),
+                                               "segment": "1"}).json()
+    query = "SELECT task FROM jobs WHERE id = ?"
+    assert module.db.one(query, (plain["id"],)) == {"task": None}
+    assert module.db.one(query, (masked["id"],)) == {"task": "segment"}
+
+
+def test_the_model_cache_keeps_tasks_apart(studio, monkeypatch):
+    """The same weights with and without masks are two loaded models, each loaded once."""
+    _, module = studio
+    built = []
+
+    class Detector:
+        def __init__(self, name, verbose=True, task="detect"):
+            built.append((name, task))
+
+    import easydetect
+    monkeypatch.setattr(easydetect, "Detector", Detector)
+    module._models.clear()
+    a = module._model("dfine-s")
+    assert module._model("dfine-s") is a
+    b = module._model("dfine-s", "segment")
+    assert b is not a and module._model("dfine-s", "segment") is b
+    assert built == [("dfine-s", "detect"), ("dfine-s", "segment")]
+    module._models.clear()
 
 
 def test_a_job_without_a_dataset_still_shows_in_the_list(studio, tmp_path):

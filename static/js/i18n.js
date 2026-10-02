@@ -56,6 +56,9 @@
     "시작 모델": "Start from", "n 가장 가벼움 · s 기본 · m · l · x 가장 정확": "n lightest · s default · m · l · x most accurate",
     "비워 두면 easydetect가 정해요.": "Left empty, easydetect decides.",
     "겹친 상자 정리 (IoU)": "Overlapping boxes (IoU)", "끄기": "off",
+    "물체 윤곽 칠하기 (세그멘테이션)": "Outline objects (segmentation)",
+    "상자마다 MobileSAM이 물체 모양을 칠해요. 내 데이터로 학습한 모델도 마스크 라벨 없이 돼요. 처음 한 번 44MB를 받고, CPU에서는 사진마다 0.2초쯤 더 걸려요.":
+      "MobileSAM fills in each box's object. Works for models trained on your own boxes too, no mask labels. Downloads 44 MB once; on a CPU each picture takes about 0.2 s more.",
     "클래스 편집": "Edit class", "이름 바꾸기": "Rename", "로 합치기": "Merge into it",
     "클래스 삭제": "Delete class", "새 이름": "New name",
     "'{0}' 클래스를 지울까요? 상자 {1}개가 함께 지워지고, 뒤 클래스 번호가 하나씩 당겨져요.":

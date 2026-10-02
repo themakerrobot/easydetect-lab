@@ -136,7 +136,11 @@ Button names below are the English ones.
    off), and *Merge pieces of one object* folds the pieces of a half hidden
    object into its whole (easydetect's `contain=0.8`; off by default — on COCO it
    removes more real objects than it fixes); both apply to the
-   webcam, a single picture and batch runs alike.
+   webcam, a single picture and batch runs alike. *Outline objects* paints a
+   mask over each box on the webcam and in batch runs (easydetect's
+   `task="segment"`: MobileSAM outlines what the box holds, so a model trained
+   on boxes alone gets masks). It downloads 44 MB the first time and adds
+   about 150 ms a frame plus 25 ms a box on a CPU.
    *Predict* takes a dataset, a folder path on this
    machine, or an uploaded video, and queues it like a training job. While it
    works the job says how far it is ("이미지 54/300 · 상자 5개 · 남은 시간 약
@@ -279,3 +283,5 @@ its `platform.db`.
 `python run.py`. Windows에서는 `start-lab.bat`을 더블클릭하면 처음 한 번 설치하고 바로 열립니다. 앱 업데이트는 `git pull`, 패키지 업데이트는
 `pip install -U "easydetect[train]"`입니다. 예전 `platform/` 시절 데이터는
 `python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.
+추론 화면의 *물체 윤곽 칠하기*를 켜면 상자마다 마스크를 칠합니다(MobileSAM, 처음
+한 번 44 MB 내려받음, CPU에서 한 장에 약 150 ms + 상자당 25 ms).
