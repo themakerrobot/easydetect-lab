@@ -100,7 +100,8 @@
       </div>
 
       <div id="train-form">
-        <div class="field"><div class="pb-label" data-en="Dataset">데이터셋</div><select class="inp" id="job-dataset"></select></div>
+        <div class="field"><div class="pb-label" data-en="Dataset">데이터셋</div><select class="inp" id="job-dataset"></select>
+          <div class="hint" id="job-task" hidden></div></div>
         <div class="field"><div class="pb-label">목표</div>
           <div class="row seg full" id="presets">
             <button class="db" data-preset="fast">빠르게</button>
@@ -173,7 +174,9 @@
         <label class="check" style="margin-top:8px"><input type="checkbox" id="run-contain"> 같은 물체의 조각 상자 합치기</label>
         <div class="hint">가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요. 그런 장면에서만 켜요: 겹쳐 있는 진짜 물체(군중, 책장)도 지워서 평균으로는 손해예요.</div>
         <label class="check" style="margin-top:8px"><input type="checkbox" id="run-segment"> 물체 윤곽 칠하기 (세그멘테이션)</label>
-        <div class="hint">상자마다 MobileSAM이 물체 모양을 칠해요. 내 데이터로 학습한 모델도 마스크 라벨 없이 돼요. 처음 한 번 44MB를 받고, CPU에서는 사진마다 0.2초쯤 더 걸려요.</div></div>
+        <label class="check" style="margin-top:8px"><input type="checkbox" id="run-pose"> 키포인트 찍기 (포즈)</label>
+        <div class="hint">상자마다 MobileSAM이 물체 모양을 칠해요. 내 데이터로 학습한 모델도 마스크 라벨 없이 돼요. 처음 한 번 44MB를 받고, CPU에서는 사진마다 0.2초쯤 더 걸려요.</div>
+        <div class="hint">윤곽·키포인트로 학습한 모델은 그 학습에서 맞춘 윤곽·키포인트 모델을 써요. 아니면 키포인트는 COCO 사람 17점이에요.</div></div>
       <div class="field"><div class="pb-label">대상</div>
         <div class="row seg full" id="run-tabs">
           <button class="db on" data-run="dataset" aria-pressed="true">데이터셋</button>
@@ -431,6 +434,19 @@ const KIND = { train: "학습", autolabel: "자동 라벨", evaluate: "평가", 
 const STATUS = { queued: "대기", running: "실행 중", exporting: "내보내는 중", done: "완료",
                  failed: "실패", cancelled: "중지됨" };
 
+// what training does beyond the boxes, for the dataset picked
+let trainTasks = {};
+const TRAIN_TASK = {
+  segment: "상자를 학습한 뒤 윤곽으로 MobileSAM의 마스크 디코더도 맞춰요 (기본 20에폭). 학습 전보다 나빠지지 않아요.",
+  pose: "상자를 학습한 뒤 상자 안 키포인트 모델도 같은 에폭만큼 학습해요. 그만큼 시간이 더 걸려요.",
+};
+function showTrainTask() {
+  const text = TRAIN_TASK[trainTasks[$("job-dataset").value]];
+  $("job-task").hidden = !text;
+  $("job-task").textContent = text ? T(text) : "";
+}
+$("job-dataset").addEventListener("change", showTrainTask);
+
 async function refresh() {
   const [state, datasets, jobs, registry] = await Promise.all([
     api("/api/status"), api("/api/datasets"), api("/api/jobs"), api("/api/models")]);
@@ -456,6 +472,8 @@ async function refresh() {
   $("job-dataset").innerHTML = trainable.map((d) =>
     `<option value="${d.id}">${esc(d.name)} · ${T`라벨 ${d.labelled}/${d.images}`}</option>`).join("");
   if (keepDs && trainable.some((d) => String(d.id) === keepDs)) $("job-dataset").value = keepDs;
+  trainTasks = Object.fromEntries(datasets.map((d) => [String(d.id), d.task]));
+  showTrainTask();
   $("train-empty").hidden = trainable.length > 0;
   $("train-form").hidden = trainable.length === 0;
   const keep = $("ds-target").value;
@@ -504,7 +522,8 @@ function renderDatasets(datasets) {
     const pct = d.images ? Math.round(d.labelled / d.images * 100) : 0;
     return `
     <div class="card">
-      <div class="top"><span class="nm">${esc(d.name)}</span><span class="dim small">#${d.id}</span><span class="grow"></span>
+      <div class="top"><span class="nm">${esc(d.name)}</span><span class="dim small">#${d.id}</span>
+        ${d.task === "segment" ? `<span class="chip">${T("윤곽")}</span>` : d.task === "pose" ? `<span class="chip">${T("키포인트")}</span>` : ""}<span class="grow"></span>
         <details class="menu"><summary class="db sm" title="더 보기">⋯</summary>
           <div class="menu-list">
             <button data-stats="${d.id}">통계 보기</button>
@@ -620,7 +639,11 @@ async function showStats(datasetId) {
   if (s.empty_labels.length) warn.push(T`빈 라벨(배경) ${s.empty_labels.length}장`);
   if (s.tiny_boxes) warn.push(T`아주 작은 상자 ${s.tiny_boxes}개`);
   if (s.unknown_class_boxes) warn.push(T`클래스 범위 밖 ${s.unknown_class_boxes}개`);
-  panel.innerHTML = `<table class="mk-table">${rows}<tr><td><b>상자 합계</b></td><td><b>${s.boxes}</b></td></tr></table>`
+  if (s.task === "segment" && s.boxes > s.outlines) warn.push(T`윤곽 없는 상자 ${s.boxes - s.outlines}개`);
+  if (s.boxes_without_keypoints) warn.push(T`키포인트 없는 상자 ${s.boxes_without_keypoints}개`);
+  const extra = s.task === "segment" ? `<tr><td>${T("윤곽")}</td><td>${s.outlines}</td></tr>`
+    : s.task === "pose" ? s.per_keypoint.map((k) => `<tr><td class="dim">· ${esc(k.name)}</td><td>${k.placed}</td></tr>`).join("") : "";
+  panel.innerHTML = `<table class="mk-table">${rows}<tr><td><b>상자 합계</b></td><td><b>${s.boxes}</b></td></tr>${extra}</table>`
     + (warn.length ? `<div class="warn small" style="margin-top:6px">${warn.join(" · ")}</div>` : "");
   panel.hidden = false;
 }
@@ -1192,6 +1215,9 @@ document.querySelectorAll("#run-tabs button").forEach((b) => {
   };
 });
 $("run-model").onchange = () => { runPicked = true; };
+// masks or keypoints: one at a time
+$("run-segment").onchange = () => { if ($("run-segment").checked) $("run-pose").checked = false; };
+$("run-pose").onchange = () => { if ($("run-pose").checked) $("run-segment").checked = false; };
 $("run-conf").oninput = () => { $("run-conf-out").textContent = Number($("run-conf").value).toFixed(2); };
 $("run-iou").oninput = () => {
   const v = Number($("run-iou").value);
@@ -1202,6 +1228,7 @@ const addBoxFilters = (form) => {
   form.append("iou", $("run-iou").value);
   if ($("run-contain").checked) form.append("contain", "0.8");
   if ($("run-segment").checked) form.append("segment", "1");
+  if ($("run-pose").checked) form.append("task", "pose");
 };
 
 $("run-start").onclick = async () => {

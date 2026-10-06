@@ -160,6 +160,12 @@ img#preview{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .label-side .cls{margin-top:6px}
 .label-side .cls:first-child{margin-top:0}
 .swatch{width:12px;height:12px;border-radius:3px;flex-shrink:0}
+.swatch.round{border-radius:50%}
+.kpt-editor{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.kpt-editor textarea.inp{width:100%;resize:vertical;font-family:var(--mono);font-size:11.5px;line-height:1.5}
+.kpt-editor .pb-label{margin-top:4px}
+.kpt-editor .row{display:flex;gap:6px;align-items:center}
+.cls.kpt .ct{color:var(--ink2)}
 .cls .key{font-family:var(--mono);font-size:10.5px;color:var(--ink3);border:1px solid var(--line-soft);
   border-radius:4px;padding:0 5px;flex-shrink:0}
 .cls .key:empty{display:none}

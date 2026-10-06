@@ -35,11 +35,17 @@ from fastapi.staticfiles import StaticFiles
 from db import Database
 from labeling import (
     IMG_SUFFIXES,
+    TASKS,
+    dataset_task,
+    flip_pairs,
+    keypoint_names,
+    kpt_shape_of,
     label_path,
     labels_beside,
     list_images,
     predict_boxes,
     read_labels,
+    simplify_outline,
     write_labels,
 )
 from modelcard import model_card, slug
@@ -58,6 +64,8 @@ app = FastAPI(title="easydetect lab")
 # the themaker-ui design kit and its fonts; the pages link them relatively
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 _models: dict[str, object] = {}
+#: what training leaves beside a detector for task="pose" / "segment" to find
+SIBLING_MODELS = ("pose.onnx", "mask_decoder.onnx")
 
 
 _started = threading.Lock()
@@ -250,6 +258,7 @@ def list_datasets():
     rows = db.query("SELECT * FROM datasets ORDER BY id DESC")
     for row in rows:
         row["classes"] = json.loads(row["classes"])
+        row["task"] = _labelling(row)["task"]
     return rows
 
 
@@ -260,6 +269,7 @@ def get_dataset(dataset_id: int):
     images = list_images(images_root)
     dataset["classes"] = json.loads(dataset["classes"])
     dataset["files"] = [_file_entry(p, images_root) for p in images]
+    dataset.update(_labelling(dataset, images))
     return dataset
 
 
@@ -291,7 +301,8 @@ def dataset_image(dataset_id: int, index: int):
 
 @app.get("/api/datasets/{dataset_id}/labels/{index}")
 def get_labels(dataset_id: int, index: int):
-    return {"boxes": read_labels(_label_file(dataset_id, index))}
+    return {"boxes": read_labels(_label_file(dataset_id, index),
+                                 _kpt_shape(_dataset(dataset_id)))}
 
 
 @app.post("/api/datasets/{dataset_id}/labels/{index}")
@@ -299,7 +310,7 @@ def save_labels(dataset_id: int, index: int, payload: dict):
     """Write one image's boxes. The labelled count moves by one, not by a rescan."""
     label = _label_file(dataset_id, index)
     first_time = not label.exists()
-    write_labels(label, payload.get("boxes", []))
+    write_labels(label, payload.get("boxes", []), _kpt_shape(_dataset(dataset_id)))
     if first_time:
         db.execute("UPDATE datasets SET labelled = labelled + 1 WHERE id = ?", (dataset_id,))
     return {"saved": True}
@@ -313,14 +324,144 @@ def autolabel_one(dataset_id: int, index: int, payload: dict):
     if not 0 <= index < len(images):
         raise HTTPException(404, "no such image")
     model_name = _resolve_model(payload.get("model") or _default_model(dataset_id))
+    task = _labelling(dataset)["task"]
     try:
-        model = _model(model_name)
+        model = _model(model_name, task)
         boxes = predict_boxes(
-            model, images[index], json.loads(dataset["classes"]), float(payload.get("conf", 0.35))
+            model, images[index], json.loads(dataset["classes"]), float(payload.get("conf", 0.35)),
+            kpt_names=keypoint_names(_data_cfg(dataset)) if task == "pose" else None,
         )
     except Exception as exc:  # a missing model must not kill the page
         raise HTTPException(503, str(exc)) from exc
     return {"boxes": boxes}
+
+
+@app.post("/api/datasets/{dataset_id}/outline/{index}")
+def outline(dataset_id: int, index: int, payload: dict):
+    """Outlines for boxes on the image on screen — MobileSAM draws, a person
+    corrects. The dataset's own fine-tuned mask decoder, once it has one."""
+    import cv2
+    import numpy as np
+
+    dataset = _dataset(dataset_id)
+    images = list_images(Path(dataset["images_dir"]))
+    if not 0 <= index < len(images):
+        raise HTTPException(404, "no such image")
+    boxes = payload.get("boxes") or []
+    img = cv2.imread(str(images[index]))
+    if img is None:
+        raise HTTPException(400, "could not read that image")
+    h, w = img.shape[:2]
+    xyxy = np.array([[(b["cx"] - b["w"] / 2) * w, (b["cy"] - b["h"] / 2) * h,
+                      (b["cx"] + b["w"] / 2) * w, (b["cy"] + b["h"] / 2) * h]
+                     for b in boxes], np.float32).reshape(-1, 4)
+    try:
+        masks, _ = _segmenter(dataset_id)(img, xyxy)
+    except Exception as exc:  # a download that failed must not kill the page
+        raise HTTPException(503, str(exc)) from exc
+    from easydetect.results import Masks
+
+    return {"outlines": [simplify_outline(xy, w, h) for xy in Masks(masks).xy]}
+
+
+_segmenters: dict[str, object] = {}
+
+
+def _segmenter(dataset_id: int):
+    """MobileSAM, or the mask decoder the dataset's latest run trained."""
+    from easydetect.segment import default_segmenter
+
+    decoder = None
+    run = _latest_run(dataset_id)
+    if run is not None and (run / "weights" / "mask_decoder.onnx").exists():
+        decoder = run / "weights" / "mask_decoder.onnx"
+    key = str(decoder)
+    if key not in _segmenters:
+        _segmenters.clear()   # one at a time: a decoder is small, the encoder is not
+        _segmenters[key] = default_segmenter(decoder=decoder)
+    return _segmenters[key]
+
+
+@app.post("/api/datasets/{dataset_id}/task")
+def set_task(dataset_id: int, payload: dict):
+    """What the dataset is labelled for — boxes, outlines or keypoints — and,
+    for keypoints, which ones.
+
+    ``keypoints`` is the new list, each ``{"name", "was"}`` with ``was`` the
+    keypoint's index before (None for a new one), so renaming, adding,
+    removing and reordering carry every label file's keypoints along.
+    Switching to keypoints keeps the boxes (outlines become their boxes);
+    leaving keypoints drops them. ``dry_run`` only counts what would change.
+    """
+    dataset = _dataset(dataset_id)
+    task = str(payload.get("task") or "detect")
+    if task not in TASKS:
+        raise HTTPException(400, f"task is one of {', '.join(TASKS)}")
+    path, cfg = _data_yaml(dataset)
+    old_shape = kpt_shape_of(cfg)
+    new_shape, names, mapping = None, None, None
+    if task == "pose":
+        entries = payload.get("keypoints") or []
+        names = [str(e.get("name", "")).strip() for e in entries]
+        if not names or not all(names):
+            raise HTTPException(400, "name every keypoint, and give at least one")
+        if len(set(names)) != len(names):
+            raise HTTPException(400, "two keypoints have the same name")
+        old_k = old_shape[0] if old_shape else 0
+        mapping = []
+        for e in entries:
+            was = e.get("was")
+            mapping.append(None if was in (None, "") or not 0 <= int(was) < old_k else int(was))
+        new_shape = [len(names), 3]
+        skeleton = []
+        for pair in payload.get("skeleton") or []:
+            a, b = int(pair[0]), int(pair[1])
+            if a != b and 0 <= a < len(names) and 0 <= b < len(names):
+                skeleton.append([a, b])
+        flip = payload.get("flip")
+        if not (isinstance(flip, list) and sorted(int(f) for f in flip) == list(range(len(names)))):
+            flip = flip_pairs(names)
+
+    unchanged = old_shape == new_shape and mapping == list(range(len(mapping or [])))
+    rewrites, outlines, kept = [], 0, 0
+    if (old_shape is not None or new_shape is not None) and not unchanged:
+        for image in list_images(Path(dataset["images_dir"])):
+            label = label_path(image)
+            if not label.exists():
+                continue
+            rows = read_labels(label, old_shape)
+            for row in rows:
+                outlines += bool(row.pop("points", None))
+                old = row.pop("kpts", None) or []
+                if new_shape is not None:
+                    row["kpts"] = [old[j] if j is not None and j < len(old) else [0, 0, 0]
+                                   for j in mapping]
+                    kept += sum(1 for k in row["kpts"] if k[2] > 0)
+            rewrites.append((label, rows))
+    result = {"files": len(rewrites), "outlines_dropped": outlines if new_shape else 0,
+              "keypoints_kept": kept}
+    if payload.get("dry_run"):
+        return result
+    busy = db.one(
+        "SELECT id FROM jobs WHERE dataset_id = ? AND kind IN ('train', 'autolabel')"
+        " AND status IN ('queued', 'running', 'exporting')", (dataset_id,))
+    if busy and rewrites:
+        raise HTTPException(409, f"job #{busy['id']} uses this dataset; wait for it or stop it")
+
+    for label, rows in rewrites:            # each file whole, or not at all
+        scratch = label.with_name(label.name + ".tmp")
+        write_labels(scratch, rows, new_shape)
+        os.replace(scratch, label)
+    for key in ("kpt_shape", "flip_idx", "kpt_names", "skeleton"):
+        cfg.pop(key, None)
+    cfg["task"] = task
+    if new_shape is not None:
+        classes = json.loads(dataset["classes"])
+        cfg.update({"kpt_shape": new_shape, "flip_idx": flip,
+                    "kpt_names": {i: names for i in range(len(classes))},
+                    "skeleton": skeleton})
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {**result, **_labelling(dataset)}
 
 
 @app.post("/api/datasets/{dataset_id}/autolabel")
@@ -346,6 +487,10 @@ def dataset_stats(dataset_id: int):
     per_class = dict.fromkeys(range(len(names)), 0)
     unknown_class = 0
     boxes = tiny = 0
+    shape = _kpt_shape(dataset)
+    kpt_names = keypoint_names(_data_cfg(dataset)) or []
+    per_keypoint = [0] * len(kpt_names)
+    outlines = no_keypoints = 0
     unlabelled: list[str] = []
     empty: list[str] = []
     images = list_images(images_root)
@@ -354,11 +499,16 @@ def dataset_stats(dataset_id: int):
         if not label.exists():
             unlabelled.append(image.relative_to(images_root).as_posix())
             continue
-        rows = read_labels(label)
+        rows = read_labels(label, shape)
         if not rows:
             empty.append(image.relative_to(images_root).as_posix())
         for row in rows:
             boxes += 1
+            outlines += bool(row.get("points"))
+            placed = [k[2] > 0 for k in row.get("kpts") or []]
+            no_keypoints += shape is not None and not any(placed)
+            for j, on in enumerate(placed[:len(per_keypoint)]):
+                per_keypoint[j] += on
             if row["cls"] in per_class:
                 per_class[row["cls"]] += 1
             else:
@@ -373,6 +523,11 @@ def dataset_stats(dataset_id: int):
         "unlabelled": unlabelled,
         "empty_labels": empty,
         "tiny_boxes": tiny,
+        "task": _labelling(dataset, images)["task"],
+        "outlines": outlines,
+        "per_keypoint": [{"name": n, "placed": c}
+                         for n, c in zip(kpt_names, per_keypoint, strict=True)],
+        "boxes_without_keypoints": no_keypoints,
     }
 
 
@@ -432,6 +587,10 @@ def export_dataset(dataset_id: int):
             zf.writestr(f"{split}.txt", "\n".join(arcs) + "\n")
             cfg[split] = f"{split}.txt"
         cfg["names"] = dict(enumerate(json.loads(dataset["classes"])))
+        own = _data_cfg(dataset)
+        for key in ("task", "kpt_shape", "flip_idx", "kpt_names", "skeleton"):
+            if key in own:
+                cfg[key] = own[key]
         zf.writestr("data.yaml", yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
     buffer.seek(0)
     name = _slug(dataset["name"])
@@ -670,6 +829,7 @@ async def batch_predict(
     iou: str = Form(None),
     contain: str = Form(None),
     segment: str = Form(None),
+    task: str = Form(None),
 ):
     """Queue a run over a dataset, a folder on this machine, or an uploaded video."""
     if video is not None:
@@ -692,7 +852,7 @@ async def batch_predict(
         model=_resolve_model(model),
         conf=conf,
         source=str(source),
-        task="segment" if _task(segment) == "segment" else None,
+        task=None if _task(segment, task) == "detect" else _task(segment, task),
         **filters,
     )
     return {"id": job_id}
@@ -1055,7 +1215,7 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
         model_files = (".xml", ".bin") if kind == "openvino" else (".onnx",)
         files = [p for p in sorted((run_dir / "openvino").glob("*"))
                  if p.suffix in model_files or p.name == "labels.txt"
-                 or p.name.endswith(".names.json")]
+                 or p.name.endswith(".names.json") or p.name in SIBLING_MODELS]
         if not any(p.suffix in model_files for p in files):
             raise HTTPException(404, "no exported IR" if kind == "openvino" else "no exported ONNX")
         archive = run_dir / f"job{job_id}-{kind}.zip"
@@ -1264,7 +1424,7 @@ async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)
 
     xml = next(Path(job["run_dir"]).glob("openvino/*.xml"), None)
     weights = str(xml or Path(job["run_dir"]) / "weights" / "best.pt")
-    result = _model(weights)(frame, conf=conf)[0]
+    result = _model(weights, _run_task(job["run_dir"]))(frame, conf=conf)[0]
     ok, buffer = cv2.imencode(".jpg", result.plot())
     if not ok:
         raise HTTPException(500, "could not encode the result")
@@ -1277,7 +1437,8 @@ async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)
 
 @app.post("/api/preview")
 async def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile = None,
-                  iou: str = Form(None), contain: str = Form(None), segment: str = Form(None)):
+                  iou: str = Form(None), contain: str = Form(None), segment: str = Form(None),
+                  task: str = Form(None)):
     """One frame in, one annotated frame out — what the webcam preview posts to."""
     filters = _box_filters(iou, contain)
     import cv2
@@ -1289,7 +1450,7 @@ async def preview(model: str = Form(...), conf: float = Form(0.5), image: Upload
     if frame is None:
         raise HTTPException(400, "could not read that image")
     try:
-        result = _model(_resolve_model(model), _task(segment))(
+        result = _model(_resolve_model(model), _task(segment, task))(
             frame, conf=conf, verbose=False, **filters)[0]
     except Exception as exc:
         raise HTTPException(503, str(exc)) from exc
@@ -1480,9 +1641,66 @@ def _model(name: str, task: str = "detect"):
     return _models[key]
 
 
-def _task(segment: str | None) -> str:
-    """The form's "outline objects" box: masks with every box, or boxes alone."""
+def _task(segment: str | None, task: str | None = None) -> str:
+    """The form's "outline objects" / "keypoints" boxes: masks or keypoints
+    with every box, or boxes alone."""
+    if str(task or "").lower() in ("pose", "segment"):
+        return str(task).lower()
     return "segment" if str(segment or "").lower() in ("1", "true", "on", "yes") else "detect"
+
+
+def _data_yaml(dataset: dict) -> tuple[Path, dict]:
+    path = Path(dataset["path"]) / "data.yaml"
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    except yaml.YAMLError:
+        cfg = None
+    return path, cfg if isinstance(cfg, dict) else {}
+
+
+def _data_cfg(dataset: dict) -> dict:
+    return _data_yaml(dataset)[1]
+
+
+def _kpt_shape(dataset: dict) -> list[int] | None:
+    return kpt_shape_of(_data_cfg(dataset))
+
+
+def _labelling(dataset: dict, images: list[Path] | None = None) -> dict:
+    """``task`` and, for a keypoint dataset, ``keypoints`` ({names, skeleton,
+    flip}) — what the labelling page draws and the trainer learns."""
+    cfg = _data_cfg(dataset)
+    if images is None and kpt_shape_of(cfg) is None and cfg.get("task") not in TASKS:
+        images = list_images(Path(dataset["images_dir"]))
+    task = dataset_task(cfg, (label_path(i) for i in images or ()))
+    out = {"task": task, "keypoints": None}
+    if task == "pose":
+        names = keypoint_names(cfg)
+        flip = cfg.get("flip_idx")
+        out["keypoints"] = {
+            "names": names,
+            "skeleton": [[int(a), int(b)] for a, b in cfg.get("skeleton") or []],
+            "flip": [int(f) for f in flip] if flip and len(flip) == len(names)
+            else flip_pairs(names),
+        }
+    return out
+
+
+def _latest_run(dataset_id: int) -> Path | None:
+    run = db.one(
+        "SELECT run_dir FROM jobs WHERE dataset_id = ? AND kind = 'train' AND status = 'done'"
+        " AND run_dir IS NOT NULL ORDER BY id DESC LIMIT 1", (dataset_id,))
+    return Path(run["run_dir"]) if run else None
+
+
+def _run_task(run_dir: Path) -> str:
+    """What a trained run can do beyond boxes: keypoints or outlines it learned."""
+    weights = Path(run_dir) / "weights"
+    if (weights / "pose.onnx").exists():
+        return "pose"
+    if (weights / "mask_decoder.onnx").exists():
+        return "segment"
+    return "detect"
 
 
 def _register(name: str, root: Path, names: list[str] | None = None) -> dict:
@@ -1543,8 +1761,9 @@ def _highest_class_in_use(dataset: dict) -> int | None:
     """The largest class index any label file refers to, or None when unlabelled."""
     images_root = Path(dataset["images_dir"])
     highest = None
+    shape = _kpt_shape(dataset)
     for image in list_images(images_root):
-        for row in read_labels(label_path(image)):
+        for row in read_labels(label_path(image), shape):
             if highest is None or row["cls"] > highest:
                 highest = row["cls"]
     return highest
@@ -1626,6 +1845,14 @@ def _combine(sources: list[dict], name: str) -> dict:
         for class_name in json.loads(source["classes"]):
             if class_name not in names:
                 names.append(class_name)
+    # keypoints merge only with the same keypoints: index i must mean one thing
+    labelling = {(tuple(kpt_shape_of(c) or ()), tuple(keypoint_names(c) or ()))
+                 for c in map(_data_cfg, sources)}
+    if len(labelling) > 1:
+        raise HTTPException(400, "these datasets have different keypoints; "
+                                 "give them the same keypoints first")
+    first = _data_cfg(sources[0])
+    shape = kpt_shape_of(first)
 
     target = _fresh_dir(DATASETS, name)
     (target / "images").mkdir(parents=True)
@@ -1643,10 +1870,20 @@ def _combine(sources: list[dict], name: str) -> dict:
             label = label_path(image)
             if not label.exists():
                 continue
-            rows = [dict(row, cls=remap.get(row["cls"], row["cls"])) for row in read_labels(label)]
-            write_labels((target / "labels" / destination.name).with_suffix(".txt"), rows)
+            rows = [dict(row, cls=remap.get(row["cls"], row["cls"]))
+                    for row in read_labels(label, shape)]
+            write_labels((target / "labels" / destination.name).with_suffix(".txt"), rows, shape)
 
     registered = _register(name, target, names=names)
+    tasks = {_labelling(s)["task"] for s in sources}
+    carried = {k: first[k] for k in ("kpt_shape", "flip_idx", "skeleton") if k in first}
+    if shape is not None:
+        carried["kpt_names"] = {i: keypoint_names(first) for i in range(len(names))}
+    if len(tasks) == 1 or carried:
+        cfg = yaml.safe_load((target / "data.yaml").read_text(encoding="utf-8")) or {}
+        cfg.update(carried, task="pose" if shape is not None else tasks.pop())
+        (target / "data.yaml").write_text(
+            yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return {**registered, "added": copied, "sources": [s["id"] for s in sources]}
 
 
@@ -1665,6 +1902,8 @@ def _rename_in_data_yaml(dataset: dict, names: list[str]) -> None:
         return
     cfg["names"] = dict(enumerate(names))
     cfg.pop("nc", None)                           # names alone say how many
+    if isinstance(cfg.get("kpt_names"), dict):    # one keypoint list per class
+        cfg["kpt_names"] = {i: keypoint_names(cfg) for i in range(len(names))}
     path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 

@@ -194,12 +194,60 @@
     "다 그린 것 {0}/{1}": "done {0}/{1}", "복사할 이전 상자가 없어요": "No previous boxes to copy",
     "자동 라벨 중…": "Auto-labelling…", "자동 라벨이 안 됐어요: {0}": "Auto-label failed: {0}",
     "{0} 을(를) 데이터셋에서 지울까요?": "Remove {0} from the dataset?",
+    "라벨 종류": "What to label", "상자": "Boxes", "윤곽": "Outlines", "키포인트": "Keypoints",
+    "물체마다 상자 하나": "One box an object", "물체마다 윤곽 (세그멘테이션)": "An outline an object (segmentation)",
+    "상자와 그 안의 점들 (포즈)": "A box and points inside it (pose)",
+    "물체마다 상자를 그려요.": "Draw a box around each object.",
+    "물체마다 윤곽을 그려요. 상자를 그리면 AI(MobileSAM)가 윤곽을 따 주고, 점을 끌어 고쳐요. 학습하면 윤곽(마스크) 모델도 함께 맞춰요.":
+      "Outline each object. Draw a box and AI (MobileSAM) traces the outline; drag its points to fix it. Training also fits the outline (mask) model.",
+    "상자를 그린 뒤 그 안의 키포인트를 차례로 찍어요. 학습하면 키포인트 모델도 함께 학습해요.":
+      "Draw a box, then click its keypoints in order. Training also trains the keypoint model.",
+    "편집": "Edit", "점 이름 (한 줄에 하나, 순서대로)": "Point names (one a line, in order)",
+    "잇는 선 (한 줄에 둘: 이름 - 이름)": "Lines between them (one a line: name - name)",
+    "COCO 사람 17점": "COCO people, 17 points",
+    "COCO 사람 17점: 자동 라벨에 COCO 포즈 모델을 바로 써요": "COCO's 17 body points: auto-label can use the COCO pose model straight away",
+    "취소": "Cancel", "저장": "Save",
+    "왼쪽·오른쪽(left/right, l_/r_, 왼/오른)이 짝지어진 이름은 좌우 뒤집기 학습에서 서로 바뀌어요.":
+      "Names that pair up left and right (left/right, l_/r_) swap when training flips a picture.",
+    "찍었어요": "Placed", "가려진 점": "Hidden point", "아직 안 찍었어요": "Not placed yet",
+    "윤곽 그리기": "Draw outline", "클릭으로 점을 찍어 윤곽을 그려요 (P)": "Click points to draw an outline (P)",
+    "AI 윤곽": "AI outline", "고른 상자(없으면 윤곽 없는 상자 모두)의 윤곽을 AI가 따요 (S)":
+      "AI traces the selected box's outline, or every box without one (S)",
+    "상자를 그리면 바로": "As soon as a box is drawn",
+    "윤곽 그리기: 클릭으로 점 · 첫 점이나": "draw outline: click for points · the first point or",
+    "로 닫기 ·": "closes ·", "취소 ·": "cancels ·",
+    "AI 윤곽 · 점을 끌어 고치기 · 선을 더블클릭하면 점 추가 · 점 우클릭은 지우기":
+      "AI outline · drag points to fix · double-click a line to add a point · right-click a point to remove it",
+    "상자를 고르고 클릭으로 키포인트를 차례로 찍어요 ·": "pick a box and click its keypoints in order ·",
+    "+클릭은 가려진 점 ·": "+click: a hidden point ·", "다음 점 · 점을 끌어 옮기기 · 점 우클릭: 가려짐 → 지우기 ·":
+      "next point · drag a point to move it · right-click a point: hidden → removed ·",
+    "선택 해제": "deselect",
+    "키포인트를 모두 지우고 상자만 남겨요 (라벨 파일 {0}개).\n되돌릴 수 없어요. 필요하면 먼저 데이터셋을 복제해 두세요.":
+      "This removes every keypoint and keeps the boxes ({0} label files).\nIt cannot be undone; duplicate the dataset first if you may want them.",
+    "잇는 선을 못 읽었어요: {0}": "Could not read the line: {0}",
+    "키포인트 이름을 하나 이상 적어 주세요": "Name at least one keypoint", "같은 이름이 두 번 있어요": "A name appears twice",
+    "윤곽 {0}개는 상자로 바뀌고": "{0} outlines become boxes", "키포인트 {0}종은 지워져요": "{0} keypoints are removed",
+    "라벨 파일 {0}개를 고쳐 써요: {1}.\n되돌릴 수 없어요. 필요하면 먼저 데이터셋을 복제해 두세요.":
+      "{0} label files are rewritten: {1}.\nIt cannot be undone; duplicate the dataset first if you may want them.",
+    "윤곽을 딸 상자가 없어요": "No box to outline", "윤곽 따는 중…": "Tracing outlines…",
+    "윤곽을 못 땄어요: {0}": "Could not trace outlines: {0}",
+    "윤곽 없는 상자 {0}개": "{0} boxes without an outline", "키포인트 없는 상자 {0}개": "{0} boxes without keypoints",
+    "키포인트 찍기 (포즈)": "Place keypoints (pose)",
+    "윤곽·키포인트로 학습한 모델은 그 학습에서 맞춘 윤곽·키포인트 모델을 써요. 아니면 키포인트는 COCO 사람 17점이에요.":
+      "A model trained on outlines or keypoints uses the outline or keypoint model fitted with it; otherwise keypoints are COCO's 17 body points.",
+    "상자를 학습한 뒤 윤곽으로 MobileSAM의 마스크 디코더도 맞춰요 (기본 20에폭). 학습 전보다 나빠지지 않아요.":
+      "After the boxes, MobileSAM's mask decoder is fitted to the outlines (20 epochs). It never ends worse than it started.",
+    "상자를 학습한 뒤 상자 안 키포인트 모델도 같은 에폭만큼 학습해요. 그만큼 시간이 더 걸려요.":
+      "After the boxes, a keypoint model trains for as many epochs on what is inside them, which takes longer.",
   };
 
   // what the server writes while a job runs: "에폭 3/50 · 배치 12/40 · 남은 시간 약 4분"
   const FRAGMENTS = [
     [/(\d+)시간/g, "$1 h"], [/(\d+)분/g, "$1 min"], [/(\d+)초/g, "$1 s"],
     [/남은 시간 계산 중/g, "estimating time left"], [/남은 시간 약 ([^·]+?)\s*$/, "~$1 left"],
+    [/키포인트 학습/g, "keypoint training"], [/윤곽\(마스크\) 학습/g, "outline (mask) training"],
+    [/준비 · 사진 (\d+)\/(\d+) 읽는 중/g, "preparing · reading picture $1/$2"],
+    [/키포인트 AP/g, "keypoint AP"], [/윤곽 mIoU ([\d.]+) \(학습 전 ([\d.]+)\)/g, "outline mIoU $1 (before training $2)"],
     [/에폭 (\d+)\/(\d+)/g, "epoch $1/$2"], [/배치 (\d+)\/(\d+)/g, "batch $1/$2"], [/검증 중/g, "validating"],
     [/프레임 (\d+)\/(\d+)/g, "frame $1/$2"], [/이미지 (\d+)\/(\d+)/g, "image $1/$2"],
     [/상자 (\d+)개/g, "$1 boxes"], [/(\d+)장 미리보기/g, "$1 previews"], [/(\d+)장/g, "$1 images"],

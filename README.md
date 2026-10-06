@@ -86,15 +86,37 @@ Button names below are the English ones.
    `valid/images`, …) can be browsed one folder at a time, and ←/→ stay in it;
    background frames — a label with no boxes — are marked apart from pictures
    that have boxes.
+
+   **Outlines and keypoints.** *What to label* at the top of the sidebar picks
+   boxes, outlines (segmentation) or keypoints (pose); the label files are
+   Ultralytics' formats, so an export trains in either tool.
+   - *Outlines*: draw a box and AI (MobileSAM, 44 MB once) traces the object's
+     outline, or <kbd>P</kbd> to click one point by point (the first point or
+     <kbd>Enter</kbd> closes it). Drag a point to move it, double-click an
+     edge to add one, right-click a point to remove it; <kbd>S</kbd> traces
+     the selected box, or every box still without an outline. Once the
+     dataset has a trained run, its own fine-tuned decoder traces instead.
+   - *Keypoints*: name the points once (one a line, with the lines that join
+     them; *COCO people, 17 points* fills in COCO's body), then draw a box and
+     click its points in order — the next one to place is shown by the
+     pointer and highlighted in the sidebar. <kbd>Shift</kbd>+click places a
+     hidden point, <kbd>Tab</kbd> skips to the next, right-click turns a point
+     hidden and then removes it. Renaming, reordering, adding or removing
+     keypoints later carries every label file's points along. Names that pair
+     left and right (`left_`/`right_`, `l_`/`r_`, 왼/오른) swap when training
+     flips a picture.
 3. **Keep the set honest** — *Statistics* counts boxes per class and flags what usually
    bites: images with no label, labels with no boxes, specks under 0.1% of the
-   frame. *Duplicate* takes a snapshot before a risky relabel, *Merge selected* combines sets and
+   frame — and boxes still without an outline or without keypoints, with a
+   count for each keypoint. *Duplicate* takes a snapshot before a risky relabel, *Merge selected* combines sets and
    remaps class indices by name (index 0 rarely means the same thing in two
    datasets), and an image can be dropped with its label from the labelling page.
 4. **Let the model do the first pass** — *Auto-label* fills the current image;
    *Auto-label all* queues a job over every unlabelled image in the dataset.
    Correcting boxes is far quicker than drawing them, and once you have a
-   `best.pt` you can point the auto-labeller at it.
+   `best.pt` you can point the auto-labeller at it. On an outline dataset the
+   drafts come with outlines; on a keypoint dataset with the keypoints a model
+   knows by name — a run trained on the dataset, or COCO's people.
 5. **Train** — a goal (빠르게 / 균형 / 정확하게) or your own model, epochs,
    batch, backbone freezing, "stop when it stops improving" (patience) and
    zoom/crop augmentation; image size and device under 고급 설정, and there
@@ -208,6 +230,8 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `POST /api/datasets/{id}/autolabel` | queue a pass over the whole dataset |
 | `POST /api/datasets/{id}/classes` | rename or add classes; data.yaml follows, its split kept |
 | `POST /api/datasets/{id}/classes/remove` | `{index, into?, dry_run?}` — delete a class, or merge it into `into`; every label file follows |
+| `POST /api/datasets/{id}/task` | `{task, keypoints?, skeleton?, dry_run?}` — boxes, outlines (`segment`) or keypoints (`pose`, `keypoints: [{name, was}]`); label files follow |
+| `POST /api/datasets/{id}/outline/{index}` | `{boxes}` — MobileSAM's outline for each box, as points |
 | `GET /api/models` | the registry, plus the names that download themselves |
 | `POST /api/models` | `{job_id, name, note}` — register a finished run |
 | `POST /api/models/upload` | multipart: `name`, `files` (a .pt or .onnx, or an IR's .xml + .bin together), `classes` |
@@ -285,3 +309,16 @@ its `platform.db`.
 `python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.
 추론 화면의 *물체 윤곽 칠하기*를 켜면 상자마다 마스크를 칠합니다(MobileSAM, 처음
 한 번 44 MB 내려받음, CPU에서 한 장에 약 150 ms + 상자당 25 ms).
+
+라벨링 화면 왼쪽 위 *라벨 종류*에서 상자 / 윤곽 / 키포인트를 고릅니다.
+- **윤곽**: 상자를 그리면 AI(MobileSAM)가 윤곽을 따 줍니다. <kbd>P</kbd>로
+  직접 점을 찍어 그릴 수도 있고(첫 점이나 <kbd>Enter</kbd>로 닫기), 점을 끌어
+  고치고, 선을 더블클릭해 점을 더하고, 점을 우클릭해 지웁니다. 학습하면
+  상자 검출기 다음에 MobileSAM의 마스크 디코더를 내 윤곽에 맞춥니다(기본
+  20에폭, 학습 전 점수보다 나빠지지 않음).
+- **키포인트**: 점 이름을 한 번 정하고(*COCO 사람 17점* 버튼도 있음), 상자를
+  그린 뒤 점을 차례로 클릭합니다. <kbd>Shift</kbd>+클릭은 가려진 점,
+  <kbd>Tab</kbd>은 다음 점, 우클릭은 가려짐 → 지우기. 학습하면 상자 검출기
+  다음에 키포인트 모델을 같은 에폭만큼 학습하고, 학습 화면에 그 단계의
+  진행과 AP가 나옵니다. 끝난 모델은 키포인트를 찍고(추론 화면 *키포인트
+  찍기*), 내보낸 OpenVINO/ONNX zip에 `pose.onnx`가 함께 들어갑니다.

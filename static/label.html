@@ -19,13 +19,37 @@
 
 <main class="mk-main label-main">
   <section class="pan pan-side label-side">
-    <div class="ph">클래스</div>
+    <div class="ph">라벨 종류</div>
     <div class="pb">
+      <div class="row seg full" id="task-tabs">
+        <button class="db" data-task="detect" title="물체마다 상자 하나">상자</button>
+        <button class="db" data-task="segment" title="물체마다 윤곽 (세그멘테이션)">윤곽</button>
+        <button class="db" data-task="pose" title="상자와 그 안의 점들 (포즈)">키포인트</button>
+      </div>
+      <div class="hint" id="task-hint"></div>
+      <div class="sec2" id="kpt-panel" hidden>
+        <div class="st">키포인트 <span class="grow"></span><button class="db sm" id="kpt-edit">편집</button></div>
+        <div id="kpts"></div>
+        <div id="kpt-editor" class="kpt-editor" hidden>
+          <div class="pb-label">점 이름 (한 줄에 하나, 순서대로)</div>
+          <textarea class="inp" id="kpt-names" rows="6" placeholder="head&#10;tail"></textarea>
+          <div class="pb-label">잇는 선 (한 줄에 둘: 이름 - 이름)</div>
+          <textarea class="inp" id="kpt-skeleton" rows="3" placeholder="head - tail"></textarea>
+          <div class="row">
+            <button class="db sm" id="kpt-coco" title="COCO 사람 17점: 자동 라벨에 COCO 포즈 모델을 바로 써요">COCO 사람 17점</button>
+            <span class="grow"></span>
+            <button class="db sm" id="kpt-cancel">취소</button>
+            <button class="db sm go" id="kpt-save">저장</button>
+          </div>
+          <div class="hint">왼쪽·오른쪽(left/right, l_/r_, 왼/오른)이 짝지어진 이름은 좌우 뒤집기 학습에서 서로 바뀌어요.</div>
+        </div>
+      </div>
+      <div class="sec2"><div class="st">클래스</div>
       <div id="classes"></div>
       <div class="row" style="margin-top:8px">
         <input class="inp" id="new-class" placeholder="클래스 추가">
         <button class="db" id="add-class" title="추가">추가</button>
-      </div>
+      </div></div>
       <div class="sec2">
         <div class="st">이미지</div>
         <select class="inp" id="folder" title="폴더별로 보기" style="width:100%;margin-bottom:8px"></select>
@@ -42,6 +66,10 @@
       <span class="sep"></span>
       <button class="db go" id="auto" title="모델이 상자 초안을 그려요">자동 라벨</button>
       <button class="db" id="copy" title="이전 이미지의 상자를 그대로 가져와요 (C)">이전 상자 복사</button>
+      <span class="sep" data-for="segment"></span>
+      <button class="db" id="poly-tool" data-for="segment" aria-pressed="false" title="클릭으로 점을 찍어 윤곽을 그려요 (P)">윤곽 그리기</button>
+      <button class="db" id="sam" data-for="segment" title="고른 상자(없으면 윤곽 없는 상자 모두)의 윤곽을 AI가 따요 (S)">AI 윤곽</button>
+      <label class="check hint" data-for="segment" style="margin:0"><input type="checkbox" id="sam-auto" checked> 상자를 그리면 바로</label>
       <span class="sep"></span>
       <button class="db" id="undo" title="Ctrl+Z">되돌리기</button>
       <button class="db" id="clear">모두 지우기</button>
@@ -55,6 +83,10 @@
       <kbd>1</kbd>–<kbd>9</kbd> 클래스 · <kbd>Del</kbd> 지우기 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 되돌리기 ·
       <kbd>←</kbd> <kbd>→</kbd> 넘기기 · <kbd>C</kbd> 이전 상자 복사 · 휠 확대 ·
       <kbd>Space</kbd>+끌기로 화면 이동 · 저장은 저절로 돼요
+      <div data-for="segment"><kbd>P</kbd> 윤곽 그리기: 클릭으로 점 · 첫 점이나 <kbd>Enter</kbd>로 닫기 · <kbd>Esc</kbd> 취소 ·
+        <kbd>S</kbd> AI 윤곽 · 점을 끌어 고치기 · 선을 더블클릭하면 점 추가 · 점 우클릭은 지우기</div>
+      <div data-for="pose">상자를 고르고 클릭으로 키포인트를 차례로 찍어요 · <kbd>Shift</kbd>+클릭은 가려진 점 ·
+        <kbd>Tab</kbd> 다음 점 · 점을 끌어 옮기기 · 점 우클릭: 가려짐 → 지우기 · <kbd>Esc</kbd> 선택 해제</div>
     </div>
   </section>
 </main>
@@ -62,6 +94,14 @@
 <script src="../static/js/i18n.js"></script>
 <script>
 const COLORS = ["#ff5a5a","#4da3ff","#3ecf8e","#ffb648","#c07cff","#39d5d5","#ff7ac0","#9dd23a","#ff9060"];
+// one colour a keypoint, the same on every box
+const KCOLORS = ["#ff3b30","#ff9500","#ffcc00","#34c759","#00c7be","#30b0ff","#5856d6","#af52de",
+                 "#ff2d55","#a2845e","#64d2ff","#bf5af2","#ffd60a","#32d74b","#0a84ff","#ff6961","#7d7aff"];
+const COCO_NAMES = ["nose","left_eye","right_eye","left_ear","right_ear","left_shoulder","right_shoulder",
+  "left_elbow","right_elbow","left_wrist","right_wrist","left_hip","right_hip","left_knee","right_knee",
+  "left_ankle","right_ankle"];
+const COCO_SKELETON = [[15,13],[13,11],[16,14],[14,12],[11,12],[5,11],[6,12],[5,6],[5,7],[6,8],[7,9],
+  [8,10],[1,2],[0,1],[0,2],[1,3],[2,4],[3,5],[4,6]];
 const $ = (id) => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 const DATASET = Number(location.pathname.split("/").pop());
@@ -71,6 +111,14 @@ let dataset = null, index = 0, boxes = [], img = new Image(), cls = 0, selected 
 let action = null, history = [], dirty = false;
 let zoom = 1, baseWidth = 0, lastBoxes = [], onlyUnlabelled = false, spaceDown = false;
 let folder = "";   // "" = every folder
+let tool = "box";  // "poly": clicks add outline points (outline datasets)
+let poly = null;   // the outline being drawn: [[x, y], ...] 0-1
+let hover = null;  // the pointer, in image pixels, for previews
+let kp = 0;        // the keypoint the next click places
+
+const task = () => dataset?.task || "detect";
+const kptNames = () => dataset?.keypoints?.names || [];
+const copy = (x) => JSON.parse(JSON.stringify(x));
 
 const folderOf = (name) => name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "";
 const inFolder = (f) => !folder || folderOf(f.name) === folder;
@@ -97,21 +145,142 @@ function step(delta) {
 const api = async (path, options) => {
   const res = await fetch(path, options);
   const body = await res.json();
-  if (!res.ok) throw new Error(body.error || res.status);
+  if (!res.ok) throw new Error(body.error || body.detail || res.status);
   return body;
 };
+const post = (path, body) => api(path, { method: "POST",
+  headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 async function boot() {
   dataset = await api(`/api/datasets/${DATASET}`);
   document.title = T`${dataset.name} — 상자 그리기`;
   $("title").textContent = dataset.name;
-  renderFolders(); renderClasses(); renderFiles();
+  renderTask(); renderFolders(); renderClasses(); renderFiles();
   // open on a picture with boxes: exports often lead with background frames,
   // and an empty first page reads as labels that failed to load
   const first = dataset.files.findIndex((f) => f.boxes > 0);
   await load(Math.max(first, 0));
   document.addEventListener("keydown", onKey);
 }
+
+// ---------------------------------------------------------- what is labelled
+
+const HINTS = {
+  detect: "물체마다 상자를 그려요.",
+  segment: "물체마다 윤곽을 그려요. 상자를 그리면 AI(MobileSAM)가 윤곽을 따 주고, 점을 끌어 고쳐요. 학습하면 윤곽(마스크) 모델도 함께 맞춰요.",
+  pose: "상자를 그린 뒤 그 안의 키포인트를 차례로 찍어요. 학습하면 키포인트 모델도 함께 학습해요.",
+};
+
+function renderTask() {
+  document.querySelectorAll("#task-tabs [data-task]").forEach((b) => {
+    const on = b.dataset.task === task();
+    b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
+  });
+  $("task-hint").textContent = T(HINTS[task()]);
+  document.querySelectorAll("[data-for]").forEach((el) => { el.hidden = el.dataset.for !== task(); });
+  $("kpt-panel").hidden = task() !== "pose" && $("kpt-editor").hidden;
+  if (task() !== "segment") { tool = "box"; poly = null; }
+  $("poly-tool").classList.toggle("on", tool === "poly");
+  $("poly-tool").setAttribute("aria-pressed", tool === "poly");
+  kp = Math.min(kp, Math.max(kptNames().length - 1, 0));
+  renderKeypoints();
+}
+
+function renderKeypoints() {
+  const b = boxes[selected];
+  $("kpts").innerHTML = "";
+  kptNames().forEach((name, j) => {
+    const v = b?.kpts?.[j]?.[2] || 0;
+    const row = document.createElement("div");
+    row.className = "cls kpt" + (j === kp ? " on" : "");
+    row.setAttribute("role", "button");
+    row.innerHTML = `<div class="top"><span class="swatch round" style="background:${KCOLORS[j % KCOLORS.length]}"></span>
+      <span class="nm">${esc(name)}</span><span class="ct">${v === 2 ? "●" : v === 1 ? "◌" : ""}</span></div>`;
+    row.title = v === 2 ? T("찍었어요") : v === 1 ? T("가려진 점") : T("아직 안 찍었어요");
+    row.onclick = () => { kp = j; renderKeypoints(); draw(); };
+    $("kpts").append(row);
+  });
+}
+
+async function chooseTask(next) {
+  if (next === task()) return;
+  if (next === "pose") return openKeypointEditor();
+  try {
+    if (dirty) await save();
+    if (task() === "pose") {
+      const plan = await post(`/api/datasets/${DATASET}/task`, { task: next, dry_run: true });
+      if (plan.files && !confirm(T`키포인트를 모두 지우고 상자만 남겨요 (라벨 파일 ${plan.files}개).\n되돌릴 수 없어요. 필요하면 먼저 데이터셋을 복제해 두세요.`)) return;
+    }
+    await post(`/api/datasets/${DATASET}/task`, { task: next });
+    await reloadDataset();
+  } catch (e) { $("status").textContent = e.message; }
+}
+
+async function reloadDataset() {
+  dataset = await api(`/api/datasets/${DATASET}`);
+  boxes = []; lastBoxes = [];             // both may carry what the files no longer hold
+  $("kpt-editor").hidden = true;
+  renderTask();
+  await load(index);
+}
+
+function openKeypointEditor() {
+  const names = kptNames();
+  $("kpt-names").value = names.join("\n");
+  $("kpt-skeleton").value = (dataset.keypoints?.skeleton || [])
+    .map(([a, b]) => `${names[a]} - ${names[b]}`).join("\n");
+  $("kpt-panel").hidden = false; $("kpt-editor").hidden = false;
+  $("kpt-names").focus();
+}
+
+function closeKeypointEditor() { $("kpt-editor").hidden = true; renderTask(); }
+
+function parseSkeleton(text, names) {
+  const pairs = [];
+  for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
+    const find = (part) => {
+      part = part.trim();
+      if (names.includes(part)) return names.indexOf(part);
+      return /^\d+$/.test(part) && Number(part) >= 1 && Number(part) <= names.length ? Number(part) - 1 : -1;
+    };
+    // "a - b" first: a name may have a hyphen in it, but not one with spaces round it
+    let parts = line.split(/\s+-\s+|\s*→\s*|\s*,\s*/);
+    if (parts.length !== 2) parts = line.split("-");
+    const [a, b] = parts.length === 2 ? parts.map(find) : [-1, -1];
+    if (a < 0 || b < 0 || a === b) throw new Error(T`잇는 선을 못 읽었어요: ${line}`);
+    pairs.push([a, b]);
+  }
+  return pairs;
+}
+
+async function saveKeypoints() {
+  const names = $("kpt-names").value.split("\n").map((n) => n.trim()).filter(Boolean);
+  const old = kptNames();
+  // a name kept is that keypoint; a new name on a line whose old name is gone
+  // is that keypoint renamed — so renaming keeps every point already placed
+  const keypoints = names.map((name, i) => {
+    let was = old.indexOf(name);
+    if (was < 0 && i < old.length && !names.includes(old[i])) was = i;
+    return { name, was: was < 0 ? null : was };
+  });
+  try {
+    if (!names.length) throw new Error(T("키포인트 이름을 하나 이상 적어 주세요"));
+    if (new Set(names).size !== names.length) throw new Error(T("같은 이름이 두 번 있어요"));
+    const body = { task: "pose", keypoints, skeleton: parseSkeleton($("kpt-skeleton").value, names) };
+    if (dirty) await save();
+    const plan = await post(`/api/datasets/${DATASET}/task`, { ...body, dry_run: true });
+    const gone = old.filter((_, j) => !keypoints.some((k) => k.was === j)).length;
+    if (plan.files && (plan.outlines_dropped || gone)) {
+      const lost = [plan.outlines_dropped ? T`윤곽 ${plan.outlines_dropped}개는 상자로 바뀌고` : "",
+                    gone ? T`키포인트 ${gone}종은 지워져요` : ""].filter(Boolean).join(", ");
+      if (!confirm(T`라벨 파일 ${plan.files}개를 고쳐 써요: ${lost}.\n되돌릴 수 없어요. 필요하면 먼저 데이터셋을 복제해 두세요.`)) return;
+    }
+    await post(`/api/datasets/${DATASET}/task`, body);
+    await reloadDataset();
+  } catch (e) { $("status").textContent = e.message; }
+}
+
+// ------------------------------------------------------------------ classes
 
 const esc = (text) => String(text).replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -155,8 +324,7 @@ async function renameClass(i) {
   if (!name || name === dataset.classes[i]) return;
   const names = dataset.classes.map((n, j) => j === i ? name : n);
   try {
-    await api(`/api/datasets/${DATASET}/classes`, { method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ names }) });
+    await post(`/api/datasets/${DATASET}/classes`, { names });
     dataset.classes = names; editing = -1; renderClasses();
   } catch (e) { $("status").textContent = e.message; }
 }
@@ -166,8 +334,7 @@ async function renameClass(i) {
 // reloaded after: its boxes come back with the new class numbers.
 async function removeClass(i, into) {
   const name = dataset.classes[i];
-  const call = (extra) => api(`/api/datasets/${DATASET}/classes/remove`, { method: "POST",
-    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: i, into, ...extra }) });
+  const call = (extra) => post(`/api/datasets/${DATASET}/classes/remove`, { index: i, into, ...extra });
   try {
     if (dirty) await save();
     const plan = await call({ dry_run: true });
@@ -187,8 +354,7 @@ async function addClass() {
   const name = $("new-class").value.trim();
   if (!name) return;
   const names = [...dataset.classes, name];
-  await api(`/api/datasets/${DATASET}/classes`, { method: "POST",
-    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ names }) });
+  await post(`/api/datasets/${DATASET}/classes`, { names });
   dataset.classes = names; $("new-class").value = "";
   cls = names.length - 1; renderClasses();
 }
@@ -221,15 +387,15 @@ function renderFiles() {
 
 async function load(i) {
   if (dirty) await save();
-  if (boxes.length) lastBoxes = JSON.parse(JSON.stringify(boxes));
-  index = i; selected = -1; history = [];
+  if (boxes.length) lastBoxes = copy(boxes);
+  index = i; selected = -1; history = []; poly = null;
   boxes = (await api(`/api/datasets/${DATASET}/labels/${i}`)).boxes;
   await new Promise((done) => {
     img.onload = done;
     img.src = `/api/datasets/${DATASET}/image/${i}?t=${Date.now()}`;
   });
   canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-  fit(); renderFiles(); renderClasses(); draw();
+  fit(); renderFiles(); renderClasses(); renderKeypoints(); draw();
 }
 
 function fit(keepZoom) {
@@ -263,36 +429,19 @@ canvas.parentElement.addEventListener("wheel", (e) => {
 
 window.addEventListener("resize", () => { fit(true); draw(); });
 
+// ------------------------------------------------------------ geometry
+
 const pixels = (b) => [ (b.cx - b.w / 2) * canvas.width, (b.cy - b.h / 2) * canvas.height,
                         b.w * canvas.width, b.h * canvas.height ];
 const scale = () => canvas.width / canvas.getBoundingClientRect().width;
+const px = ([x, y]) => [x * canvas.width, y * canvas.height];
+const hasOutline = (b) => (b.points?.length || 0) >= 3;
+const placed = (k) => k && k[2] > 0;
 
-function draw() {
-  ctx.drawImage(img, 0, 0);
-  const lw = Math.max(2, Math.round((canvas.width + canvas.height) / 700));
-  ctx.lineWidth = lw; ctx.font = `${lw * 7}px system-ui, sans-serif`; ctx.textBaseline = "top";
-  boxes.forEach((b, i) => {
-    const [x, y, w, h] = pixels(b);
-    const color = COLORS[b.cls % COLORS.length];
-    ctx.strokeStyle = color; ctx.setLineDash(i === selected ? [lw * 3, lw * 2] : []);
-    ctx.strokeRect(x, y, w, h);
-    ctx.setLineDash([]);
-    if (i === selected) {                       // grab handles on the selected box
-      ctx.fillStyle = color;
-      corners(b).forEach(([hx, hy]) =>
-        ctx.fillRect(hx - lw * 2, hy - lw * 2, lw * 4, lw * 4));
-    }
-    const text = (dataset.classes[b.cls] ?? b.cls) + (b.conf ? ` ${b.conf}` : "");
-    const tw = ctx.measureText(text).width + lw * 4;
-    const ty = y - lw * 9 >= 0 ? y - lw * 9 : y;
-    ctx.fillStyle = color; ctx.fillRect(x, ty, tw, lw * 9);
-    ctx.fillStyle = "#0b0d11"; ctx.fillText(text, x + lw * 2, ty + lw * 1.2);
-  });
-  if (action?.kind === "new") {
-    ctx.strokeStyle = "#fff"; ctx.setLineDash([lw * 2, lw * 2]);
-    ctx.strokeRect(action.x0, action.y0, action.x1 - action.x0, action.y1 - action.y0);
-    ctx.setLineDash([]);
-  }
+function boxFromPoints(b) {
+  const xs = b.points.map((q) => q[0]), ys = b.points.map((q) => q[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  Object.assign(b, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 });
 }
 
 function corners(b) {
@@ -305,21 +454,120 @@ function at(event) {
   return { x: (event.clientX - rect.left) * scale(), y: (event.clientY - rect.top) * scale() };
 }
 
-function hitCorner(b, p) {
-  const grab = HANDLE * scale();
-  const found = corners(b).findIndex(([cx, cy]) => Math.abs(cx - p.x) < grab && Math.abs(cy - p.y) < grab);
-  return found;
+const near = (q, p, grab = HANDLE * scale()) => Math.abs(q[0] - p.x) < grab && Math.abs(q[1] - p.y) < grab;
+const hitCorner = (b, p) => corners(b).findIndex((q) => near(q, p));
+const hitKeypoint = (b, p) => (b.kpts || []).findIndex((k) => placed(k) && near(px(k), p));
+const hitVertex = (b, p) => hasOutline(b) ? b.points.findIndex((q) => near(px(q), p)) : -1;
+
+function inPolygon(points, p) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = px(points[i]), [xj, yj] = px(points[j]);
+    if ((yi > p.y) !== (yj > p.y) && p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
-function inside(b, p) {
+function contains(b, p) {
+  if (hasOutline(b)) return inPolygon(b.points, p);
   const [x, y, w, h] = pixels(b);
   return p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h;
+}
+
+// the topmost object under the pointer; the smallest wins where they nest
+function hitObject(p) {
+  let best = -1, area = Infinity;
+  boxes.forEach((b, i) => {
+    if (contains(b, p) && b.w * b.h < area) { best = i; area = b.w * b.h; }
+  });
+  return best;
 }
 
 function push() { history.push(JSON.stringify(boxes)); if (history.length > 50) history.shift(); }
 function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
 
+// ------------------------------------------------------------------ drawing
+
+function draw() {
+  ctx.drawImage(img, 0, 0);
+  const lw = Math.max(2, Math.round((canvas.width + canvas.height) / 700));
+  ctx.lineWidth = lw; ctx.font = `${lw * 7}px system-ui, sans-serif`; ctx.textBaseline = "top";
+  const skeleton = dataset?.keypoints?.skeleton || [];
+  boxes.forEach((b, i) => {
+    const [x, y, w, h] = pixels(b);
+    const color = COLORS[b.cls % COLORS.length];
+    const on = i === selected;
+    ctx.strokeStyle = color;
+    if (hasOutline(b)) {
+      ctx.beginPath();
+      b.points.forEach((q, k) => { const [qx, qy] = px(q); k ? ctx.lineTo(qx, qy) : ctx.moveTo(qx, qy); });
+      ctx.closePath();
+      ctx.globalAlpha = on ? 0.35 : 0.22; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.setLineDash(on ? [lw * 3, lw * 2] : []); ctx.stroke(); ctx.setLineDash([]);
+      if (on) {
+        ctx.fillStyle = "#fff";
+        b.points.forEach((q) => { const [qx, qy] = px(q); ctx.fillRect(qx - lw * 1.5, qy - lw * 1.5, lw * 3, lw * 3); });
+      }
+    } else {
+      // an outline dataset's box still waiting for its outline is dashed
+      ctx.setLineDash(on ? [lw * 3, lw * 2] : task() === "segment" ? [lw, lw * 2] : []);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+      if (on) {                                 // grab handles on the selected box
+        ctx.fillStyle = color;
+        corners(b).forEach(([hx, hy]) => ctx.fillRect(hx - lw * 2, hy - lw * 2, lw * 4, lw * 4));
+      }
+    }
+    if (b.kpts) {
+      ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, lw * 0.75);
+      skeleton.forEach(([a, c]) => {
+        if (!placed(b.kpts[a]) || !placed(b.kpts[c])) return;
+        ctx.beginPath(); ctx.moveTo(...px(b.kpts[a])); ctx.lineTo(...px(b.kpts[c])); ctx.stroke();
+      });
+      ctx.lineWidth = lw;
+      b.kpts.forEach((k, j) => {
+        if (!placed(k)) return;
+        const [kx, ky] = px(k), r = lw * (on ? 2.4 : 1.7);
+        ctx.beginPath(); ctx.arc(kx, ky, r, 0, Math.PI * 2);
+        ctx.fillStyle = KCOLORS[j % KCOLORS.length]; ctx.strokeStyle = KCOLORS[j % KCOLORS.length];
+        if (k[2] === 2) ctx.fill(); else ctx.stroke();   // hollow: there but hidden
+        if (on && j === kp) { ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.arc(kx, ky, r + lw, 0, Math.PI * 2); ctx.stroke(); }
+      });
+    }
+    const text = (dataset.classes[b.cls] ?? b.cls) + (b.conf ? ` ${b.conf}` : "");
+    const tw = ctx.measureText(text).width + lw * 4;
+    const ty = y - lw * 9 >= 0 ? y - lw * 9 : y;
+    ctx.fillStyle = color; ctx.fillRect(x, ty, tw, lw * 9);
+    ctx.fillStyle = "#0b0d11"; ctx.fillText(text, x + lw * 2, ty + lw * 1.2);
+  });
+  if (action?.kind === "new") {
+    ctx.strokeStyle = "#fff"; ctx.setLineDash([lw * 2, lw * 2]);
+    ctx.strokeRect(action.x0, action.y0, action.x1 - action.x0, action.y1 - action.y0);
+    ctx.setLineDash([]);
+  }
+  if (poly) {                                   // the outline being drawn
+    ctx.strokeStyle = "#fff"; ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    poly.forEach((q, k) => { const [qx, qy] = px(q); k ? ctx.lineTo(qx, qy) : ctx.moveTo(qx, qy); });
+    if (hover) ctx.lineTo(hover.x, hover.y);
+    ctx.stroke();
+    poly.forEach((q, k) => { const [qx, qy] = px(q); ctx.beginPath(); ctx.arc(qx, qy, lw * (k ? 1.5 : 3), 0, Math.PI * 2); ctx.fill(); });
+  }
+  // which keypoint the next click places, beside the pointer
+  if (task() === "pose" && selected >= 0 && hover && !action && kptNames().length) {
+    const label = kptNames()[kp];
+    ctx.font = `${lw * 6}px system-ui, sans-serif`;
+    const tw = ctx.measureText(label).width + lw * 4;
+    ctx.fillStyle = KCOLORS[kp % KCOLORS.length];
+    ctx.fillRect(hover.x + lw * 4, hover.y + lw * 4, tw, lw * 8);
+    ctx.fillStyle = "#0b0d11"; ctx.fillText(label, hover.x + lw * 6, hover.y + lw * 5);
+  }
+}
+
+// ------------------------------------------------------------------ pointer
+
 canvas.addEventListener("pointerdown", (e) => {
+  if (e.button === 2) return;                   // the context menu handles it
   if (e.button === 1 || spaceDown) {            // pan instead of drawing
     const stage = canvas.parentElement;
     action = { kind: "pan", x: e.clientX, y: e.clientY,
@@ -331,23 +579,33 @@ canvas.addEventListener("pointerdown", (e) => {
   const p = at(e);
   canvas.setPointerCapture(e.pointerId);
 
-  if (selected >= 0) {                       // corner of the selected box: resize
-    const corner = hitCorner(boxes[selected], p);
-    if (corner >= 0) { push(); action = { kind: "resize", corner, box: selected }; return; }
-  }
-  const hit = boxes.findIndex((b) => inside(b, p));
-  if (hit >= 0 && !e.shiftKey) {             // inside a box: select, and drag to move
-    selected = hit; cls = boxes[hit].cls; renderClasses();
-    push();
-    action = { kind: "move", box: hit, from: p, start: { ...boxes[hit] } };
+  if (tool === "poly") {                        // each click a point; the first one closes it
+    if (poly && poly.length >= 3 && near(px(poly[0]), p)) return closePoly();
+    poly = poly || [];
+    poly.push([clamp(p.x / canvas.width, 0, 1), clamp(p.y / canvas.height, 0, 1)]);
     draw();
     return;
   }
-  action = { kind: "new", x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+  if (selected >= 0) {
+    const b = boxes[selected];
+    const j = hitKeypoint(b, p);
+    if (j >= 0) { push(); kp = j; action = { kind: "kpt", box: selected, j }; renderKeypoints(); return; }
+    const v = hitVertex(b, p);
+    if (v >= 0) { push(); action = { kind: "vertex", box: selected, v }; return; }
+    const corner = hitCorner(b, p);
+    if (corner >= 0) { push(); action = { kind: "resize", corner, box: selected, start: copy(b) }; return; }
+  }
+  // a click or a drag: told apart once the pointer moves
+  // (Shift: a new box even inside another; in keypoints, a hidden point)
+  action = { kind: "press", from: p, hit: hitObject(p), shift: e.shiftKey };
 });
 
 canvas.addEventListener("pointermove", (e) => {
-  if (!action) { return; }
+  hover = at(e);
+  if (!action) {
+    if (poly || (task() === "pose" && selected >= 0)) draw();
+    return;
+  }
   if (action.kind === "pan") {
     const stage = canvas.parentElement;
     stage.scrollLeft = action.left - (e.clientX - action.x);
@@ -356,14 +614,29 @@ canvas.addEventListener("pointermove", (e) => {
   }
   const p = at(e);
   p.x = clamp(p.x, 0, canvas.width); p.y = clamp(p.y, 0, canvas.height);   // never past the image
+  if (action.kind === "press") {
+    const moved = Math.hypot(p.x - action.from.x, p.y - action.from.y) > 4 * scale();
+    if (!moved) return;
+    const { from, hit, shift } = action;
+    if (hit >= 0 && !shift) {                   // a drag inside an object moves it
+      selected = hit; cls = boxes[hit].cls; renderClasses(); renderKeypoints();
+      push();
+      action = { kind: "move", box: hit, from, start: copy(boxes[hit]) };
+    } else {
+      action = { kind: "new", x0: from.x, y0: from.y, x1: p.x, y1: p.y };
+    }
+  }
   if (action.kind === "new") { action.x1 = p.x; action.y1 = p.y; }
   else if (action.kind === "move") {
     const b = boxes[action.box], s = action.start;
-    b.cx = clamp(s.cx + (p.x - action.from.x) / canvas.width, b.w / 2, 1 - b.w / 2);
-    b.cy = clamp(s.cy + (p.y - action.from.y) / canvas.height, b.h / 2, 1 - b.h / 2);
+    b.cx = clamp(s.cx + (p.x - action.from.x) / canvas.width, s.w / 2, 1 - s.w / 2);
+    b.cy = clamp(s.cy + (p.y - action.from.y) / canvas.height, s.h / 2, 1 - s.h / 2);
+    const dx = b.cx - s.cx, dy = b.cy - s.cy;   // outline and keypoints come along
+    if (s.points) b.points = s.points.map(([x, y]) => [x + dx, y + dy]);
+    if (s.kpts) b.kpts = s.kpts.map((k) => placed(k) ? [clamp(k[0] + dx, 0, 1), clamp(k[1] + dy, 0, 1), k[2]] : k);
     dirty = true;
   } else if (action.kind === "resize") {
-    const b = boxes[action.box];
+    const b = boxes[action.box], s = action.start;
     const [x, y, w, h] = pixels(b);
     let x0 = x, y0 = y, x1 = x + w, y1 = y + h;
     if (action.corner === 0) { x0 = p.x; y0 = p.y; }
@@ -372,6 +645,19 @@ canvas.addEventListener("pointermove", (e) => {
     if (action.corner === 3) { x1 = p.x; y1 = p.y; }
     b.cx = (x0 + x1) / 2 / canvas.width; b.cy = (y0 + y1) / 2 / canvas.height;
     b.w = Math.abs(x1 - x0) / canvas.width; b.h = Math.abs(y1 - y0) / canvas.height;
+    if (s.points) {                             // an outline stretches with its box
+      const sx = b.w / Math.max(s.w, 1e-6), sy = b.h / Math.max(s.h, 1e-6);
+      b.points = s.points.map(([qx, qy]) => [b.cx + (qx - s.cx) * sx, b.cy + (qy - s.cy) * sy]);
+    }
+    dirty = true;
+  } else if (action.kind === "kpt") {
+    const k = boxes[action.box].kpts[action.j];
+    boxes[action.box].kpts[action.j] = [p.x / canvas.width, p.y / canvas.height, k[2] || 2];
+    dirty = true;
+  } else if (action.kind === "vertex") {
+    const b = boxes[action.box];
+    b.points[action.v] = [p.x / canvas.width, p.y / canvas.height];
+    boxFromPoints(b);
     dirty = true;
   }
   draw();
@@ -380,26 +666,132 @@ canvas.addEventListener("pointermove", (e) => {
 canvas.addEventListener("pointerup", () => {
   if (!action) return;
   if (action.kind === "pan") { action = null; return; }
+  if (action.kind === "press") {                // a click, not a drag
+    const { from, hit, shift } = action;
+    action = null;
+    if (task() === "pose" && selected >= 0 && kptNames().length && (hit < 0 || hit === selected)) {
+      return placeKeypoint(from, shift ? 1 : 2);
+    }
+    selected = hit;
+    if (hit >= 0) { cls = boxes[hit].cls; renderClasses(); }
+    renderKeypoints(); draw();
+    return;
+  }
+  let made = null;
   if (action.kind === "new") {
     const w = Math.abs(action.x1 - action.x0), h = Math.abs(action.y1 - action.y0);
     if (w > 4 && h > 4) {
       push();
-      boxes.push({ cls, cx: (action.x0 + action.x1) / 2 / canvas.width,
-                   cy: (action.y0 + action.y1) / 2 / canvas.height,
-                   w: w / canvas.width, h: h / canvas.height });
-      selected = boxes.length - 1; dirty = true;
+      made = { cls, cx: (action.x0 + action.x1) / 2 / canvas.width,
+               cy: (action.y0 + action.y1) / 2 / canvas.height,
+               w: w / canvas.width, h: h / canvas.height };
+      if (task() === "pose") made.kpts = kptNames().map(() => [0, 0, 0]);
+      boxes.push(made);
+      selected = boxes.length - 1; kp = 0; dirty = true;
     }
   }
   action = null;
   if (dirty) touch(); else draw();
+  renderKeypoints();
+  if (made && task() === "segment" && $("sam-auto").checked) outline([made]);
 });
 
-function touch() { dirty = true; renderClasses(); draw(); save(); }
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (selected < 0) return;
+  const b = boxes[selected], p = at(e);
+  const j = hitKeypoint(b, p);
+  if (j >= 0) {                                 // visible -> hidden -> not labelled
+    push();
+    b.kpts[j] = b.kpts[j][2] === 2 ? [b.kpts[j][0], b.kpts[j][1], 1] : [0, 0, 0];
+    return touch();
+  }
+  const v = hitVertex(b, p);
+  if (v >= 0 && b.points.length > 3) { push(); b.points.splice(v, 1); boxFromPoints(b); touch(); }
+});
+
+canvas.addEventListener("dblclick", (e) => {
+  if (tool === "poly") return closePoly();
+  if (selected < 0 || !hasOutline(boxes[selected])) return;
+  // a point on the nearest edge of the selected outline
+  const b = boxes[selected], p = at(e);
+  let best = -1, gap = Infinity;
+  b.points.forEach((q, i) => {
+    const [ax, ay] = px(q), [bx, by] = px(b.points[(i + 1) % b.points.length]);
+    const t = clamp(((p.x - ax) * (bx - ax) + (p.y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2 || 1), 0, 1);
+    const d = Math.hypot(p.x - (ax + t * (bx - ax)), p.y - (ay + t * (by - ay)));
+    if (d < gap) { gap = d; best = i; }
+  });
+  if (best >= 0 && gap < HANDLE * 2 * scale()) {
+    push(); b.points.splice(best + 1, 0, [p.x / canvas.width, p.y / canvas.height]); touch();
+  }
+});
+
+function placeKeypoint(p, visibility) {
+  const b = boxes[selected], names = kptNames();
+  if (!b.kpts || b.kpts.length !== names.length) {
+    b.kpts = names.map((_, j) => b.kpts?.[j] || [0, 0, 0]);
+  }
+  push();
+  b.kpts[kp] = [clamp(p.x / canvas.width, 0, 1), clamp(p.y / canvas.height, 0, 1), visibility];
+  // on to the next one still to place, so a body is a run of clicks
+  for (let n = 1; n <= names.length; n++) {
+    const j = (kp + n) % names.length;
+    if (!placed(b.kpts[j])) { kp = j; break; }
+  }
+  touch();
+}
+
+function closePoly() {
+  // a double-click to close also clicked twice: drop points on top of the last
+  poly = (poly || []).filter((q, i, all) => !i || Math.hypot(
+    (q[0] - all[i - 1][0]) * canvas.width, (q[1] - all[i - 1][1]) * canvas.height) > 3 * scale());
+  if (poly.length < 3) return draw();
+  push();
+  const made = { cls, points: poly };
+  boxFromPoints(made);
+  boxes.push(made); selected = boxes.length - 1; poly = null;
+  touch();
+}
+
+function setTool(next) {
+  tool = task() === "segment" ? next : "box";
+  poly = null;
+  $("poly-tool").classList.toggle("on", tool === "poly");
+  $("poly-tool").setAttribute("aria-pressed", tool === "poly");
+  draw();
+}
+
+// MobileSAM's outline for each of these objects (references, not indices: a
+// box deleted meanwhile is simply skipped). The first call downloads it.
+async function outline(objects) {
+  objects = objects.filter(Boolean);
+  if (!objects.length) { $("status").textContent = T("윤곽을 딸 상자가 없어요"); return; }
+  $("sam").disabled = true; $("status").textContent = T("윤곽 따는 중…");
+  try {
+    const res = await post(`/api/datasets/${DATASET}/outline/${index}`,
+      { boxes: objects.map(({ cx, cy, w, h }) => ({ cx, cy, w, h })) });
+    push();
+    res.outlines.forEach((points, k) => {
+      const b = objects[k];
+      if (points.length >= 3 && boxes.includes(b)) { b.points = points; boxFromPoints(b); }
+    });
+    touch();
+  } catch (e) { $("status").textContent = T`윤곽을 못 땄어요: ${e.message}`; }
+  finally { $("sam").disabled = false; }
+}
+
+function samOutline() {
+  if (task() !== "segment") return;
+  outline(selected >= 0 ? [boxes[selected]] : boxes.filter((b) => !hasOutline(b)));
+}
+
+function touch() { dirty = true; renderClasses(); renderKeypoints(); draw(); save(); }
 
 function copyPrevious() {
-  if (!lastBoxes.length) { $("status").textContent = "복사할 이전 상자가 없어요"; return; }
+  if (!lastBoxes.length) { $("status").textContent = T("복사할 이전 상자가 없어요"); return; }
   push();
-  boxes = boxes.concat(JSON.parse(JSON.stringify(lastBoxes)).map((b) => ({ ...b, conf: undefined })));
+  boxes = boxes.concat(copy(lastBoxes).map((b) => ({ ...b, conf: undefined })));
   selected = -1; touch();
 }
 
@@ -421,11 +813,9 @@ function undo() {
 }
 
 async function autolabel() {
-  $("auto").disabled = true; $("status").textContent = "자동 라벨 중…";
+  $("auto").disabled = true; $("status").textContent = T("자동 라벨 중…");
   try {
-    const res = await api(`/api/datasets/${DATASET}/autolabel/${index}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conf: 0.35 }) });
+    const res = await post(`/api/datasets/${DATASET}/autolabel/${index}`, { conf: 0.35 });
     push(); boxes = boxes.concat(res.boxes); selected = -1; touch();
   } catch (e) { $("status").textContent = T`자동 라벨이 안 됐어요: ${e.message}`; return; }
   finally { $("auto").disabled = false; }
@@ -433,11 +823,22 @@ async function autolabel() {
 }
 
 function onKey(e) {
+  if (e.target.closest?.("input, textarea, select")) return;   // typing names, not labelling
   if (e.code === "Space" && !spaceDown) { spaceDown = true; canvas.style.cursor = "grab"; e.preventDefault(); return; }
-  if (e.ctrlKey && e.key.toLowerCase() === "z") undo();
-  else if (e.key.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey) copyPrevious();
+  const key = e.key.toLowerCase();
+  if (e.ctrlKey && key === "z") undo();
+  else if (key === "escape") { if (poly) poly = null; else selected = -1; renderKeypoints(); draw(); }
+  else if (key === "enter" && poly) closePoly();
+  else if (key === "p" && task() === "segment" && !e.ctrlKey) setTool(tool === "poly" ? "box" : "poly");
+  else if (key === "s" && task() === "segment" && !e.ctrlKey && !e.metaKey) samOutline();
+  else if (key === "tab" && task() === "pose" && kptNames().length) {
+    const n = kptNames().length;
+    kp = (kp + (e.shiftKey ? n - 1 : 1)) % n; renderKeypoints(); draw();
+  }
+  else if (key === "c" && !e.ctrlKey && !e.metaKey) copyPrevious();
   else if (e.key === "ArrowRight") step(1);
   else if (e.key === "ArrowLeft") step(-1);
+  else if ((e.key === "Delete" || e.key === "Backspace") && poly) { poly.pop(); if (!poly.length) poly = null; draw(); }
   else if ((e.key === "Delete" || e.key === "Backspace") && selected >= 0) {
     push(); boxes.splice(selected, 1); selected = -1; touch();
   } else if (e.key >= "1" && e.key <= "9") {
@@ -461,6 +862,16 @@ $("drop").onclick = async () => {
   await load(Math.min(index, dataset.files.length - 1));
 };
 
+document.querySelectorAll("#task-tabs [data-task]").forEach((b) => { b.onclick = () => chooseTask(b.dataset.task); });
+$("kpt-edit").onclick = openKeypointEditor;
+$("kpt-cancel").onclick = closeKeypointEditor;
+$("kpt-save").onclick = saveKeypoints;
+$("kpt-coco").onclick = () => {
+  $("kpt-names").value = COCO_NAMES.join("\n");
+  $("kpt-skeleton").value = COCO_SKELETON.map(([a, b]) => `${COCO_NAMES[a]} - ${COCO_NAMES[b]}`).join("\n");
+};
+$("poly-tool").onclick = () => setTool(tool === "poly" ? "box" : "poly");
+$("sam").onclick = samOutline;
 $("copy").onclick = copyPrevious;
 $("add-class").onclick = addClass;
 $("new-class").onkeydown = (e) => { if (e.key === "Enter") addClass(); };
@@ -478,7 +889,8 @@ $("folder").onchange = async (e) => {
 $("auto").onclick = autolabel;
 $("undo").onclick = undo;
 $("clear").onclick = () => { push(); boxes = []; selected = -1; touch(); };
+canvas.addEventListener("pointerleave", () => { hover = null; if (!action) draw(); });
 window.addEventListener("beforeunload", save);
-addEventListener("langchange", () => { if (dataset) { document.title = T`${dataset.name} — 상자 그리기`; renderFolders(); renderFiles(); } });
+addEventListener("langchange", () => { if (dataset) { document.title = T`${dataset.name} — 상자 그리기`; renderTask(); renderFolders(); renderFiles(); } });
 boot();
 </script>

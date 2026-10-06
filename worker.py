@@ -18,7 +18,31 @@ import time
 import traceback
 from pathlib import Path
 
-from labeling import label_path, list_images, predict_boxes, write_labels
+from labeling import (
+    dataset_task,
+    keypoint_names,
+    kpt_shape_of,
+    label_path,
+    list_images,
+    predict_boxes,
+    write_labels,
+)
+
+
+def _data_cfg(dataset: dict) -> dict:
+    import yaml
+
+    path = Path(dataset["path"]) / "data.yaml"
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    except (OSError, yaml.YAMLError):
+        cfg = None
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _labelled_task(dataset: dict) -> str:
+    images = list_images(Path(dataset["images_dir"]))
+    return dataset_task(_data_cfg(dataset), (label_path(i) for i in images))
 
 
 def _loader_workers() -> int:
@@ -52,6 +76,24 @@ def _duration(seconds: float) -> str:
     if seconds >= 60:
         return f"{seconds // 60}분"
     return f"{seconds}초"
+
+
+def _stage_scores(run_dir: Path) -> str | None:
+    """What the keypoint / mask stage reached, for the finished job's line."""
+    import csv
+
+    parts = []
+    finished = run_dir / "pose" / "finished"
+    if finished.exists():
+        parts.append(f"키포인트 AP {float(finished.read_text().strip() or 0):.3f}")
+    results = run_dir / "segment" / "results.csv"
+    if results.exists():
+        with results.open(encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        if rows:
+            first, best = float(rows[0]["miou"]), max(float(r["miou"]) for r in rows)
+            parts.append(f"윤곽 mIoU {best:.3f} (학습 전 {first:.3f})")
+    return " · ".join(parts) or None
 
 
 class Cancelled(Exception):
@@ -201,6 +243,8 @@ class Worker(threading.Thread):
             """
             if job_id in self.cancelled:
                 raise Cancelled()
+            if p["phase"] in ("keypoints", "masks"):
+                return stage(p)
             epoch, epochs = p["epoch"], p["epochs"]
             if p["phase"] == "val":
                 self.db.update_job(job_id, detail=f"에폭 {epoch}/{epochs} · 검증 중")
@@ -219,6 +263,29 @@ class Worker(threading.Thread):
                 detail=f"에폭 {epoch}/{epochs} · 배치 {step}/{steps} · {eta}",
             )
 
+        def stage(p: dict) -> None:
+            """After the boxes: the keypoint network, or the mask decoder.
+
+            Its own bar from 0, with the stage named, rather than a bar
+            stuck at 100% for what can be as long again as the boxes took.
+            """
+            what = "키포인트 학습" if p["phase"] == "keypoints" else "윤곽(마스크) 학습"
+            if p.get("stage") == "encode":
+                self.db.update_job(job_id, progress=p["step"] / max(p["steps"], 1),
+                                   detail=f"{what} 준비 · 사진 {p['step']}/{p['steps']} 읽는 중")
+                return
+            epoch, epochs, step, steps = p["epoch"], p["epochs"], p["step"], p["steps"]
+            done = (epoch - 1 + step / max(steps, 1)) / max(epochs, 1)
+            left = p["seconds"] / max(step, 1) * ((steps - step) + (epochs - epoch) * steps)
+            score = (f" · AP {p['ap']:.3f}" if "ap" in p
+                     else f" · mIoU {p['miou']:.3f}" if "miou" in p else "")
+            self.db.update_job(
+                job_id, progress=done,
+                detail=f"{what} · 에폭 {epoch}/{epochs} · 배치 {step}/{steps}{score} · "
+                       + (f"남은 시간 약 {_duration(left)}" if epoch > 1 or step >= 3
+                          else "남은 시간 계산 중"))
+
+        task = _labelled_task(dataset)
         model = Detector(job["model"], verbose=False)
         # The trainer picks its own run directory and skips one that already
         # exists, so the log cannot be written there until it comes back.
@@ -244,6 +311,9 @@ class Worker(threading.Thread):
                     workers=_loader_workers(),
                     on_epoch_end=on_epoch_end,
                     on_progress=on_progress,
+                    # outlines only when the dataset is labelled for them:
+                    # a box dataset that holds a few stays a box dataset
+                    seg=task == "segment",
                 )
         except Exception:
             self.db.update_job(job_id, detail=_tail(log))  # what it said before it died
@@ -257,6 +327,7 @@ class Worker(threading.Thread):
         # export first: a job that says "done" must have everything it advertises
         self.db.update_job(job_id, status="exporting", progress=1.0, detail="exporting…")
         note = self._export(model, run_dir, job_id)
+        note = "; ".join(n for n in (_stage_scores(run_dir), note) if n) or None
         self.db.update_job(
             job_id,
             status="done",
@@ -287,13 +358,18 @@ class Worker(threading.Thread):
             )
             return
 
-        model = Detector(job["model"], verbose=False)
+        cfg = _data_cfg(dataset)
+        task = _labelled_task(dataset)
+        shape = kpt_shape_of(cfg)
+        kpt_names = keypoint_names(cfg) if task == "pose" else None
+        model = Detector(job["model"], verbose=False, task=task)
         written = 0
         for i, image in enumerate(images, start=1):
             if job_id in self.cancelled:
                 raise Cancelled()
-            boxes = predict_boxes(model, image, names, conf=job["conf"] or 0.35)
-            write_labels(label_path(image), boxes)
+            boxes = predict_boxes(model, image, names, conf=job["conf"] or 0.35,
+                                  kpt_names=kpt_names)
+            write_labels(label_path(image), boxes, shape)
             written += bool(boxes)
             self.db.update_job(job_id, progress=i / len(images))
         self.db.update_job(
