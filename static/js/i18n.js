@@ -239,6 +239,10 @@
       "After the boxes, MobileSAM's mask decoder is fitted to the outlines (20 epochs). It never ends worse than it started.",
     "상자를 학습한 뒤 상자 안 키포인트 모델도 같은 에폭만큼 학습해요. 그만큼 시간이 더 걸려요.":
       "After the boxes, a keypoint model trains for as many epochs on what is inside them, which takes longer.",
+
+    // export, and what the server refuses
+    "INT8도 만들기 (CPU에서 약 2배 빠름, 정확도 확인 필요)": "Also make INT8 (about 2× faster on a CPU; check its accuracy)",
+    "사진 목록이 바뀌었어요. 페이지를 새로 고쳐 주세요": "The picture list has changed. Reload the page",
   };
 
   // what the server writes while a job runs: "에폭 3/50 · 배치 12/40 · 남은 시간 약 4분"
@@ -256,6 +260,10 @@
     [/^#(\d+)이\(가\) 아직 돌고 있어요\. 먼저 멈춰 주세요$/, "#$1 is still running — stop it first"],
     [/^등록한 모델 '(.+)'이\(가\) 이 결과를 써요\. 모델 탭에서 먼저 빼 주세요$/,
      "registered model '$1' uses this run — remove it under Models first"],
+    [/^'(.+)'은\(는\) 랩 폴더 밖이에요\. 서버를 (\w+)=1로 켜면 열 수 있어요$/,
+     "'$1' is outside the lab's folders. Start the server with $2=1 to open it"],
+    [/^'(.+)'은\(는\) 등록한 모델도 랩 폴더 안의 파일도 아니에요\. 모델 탭에서 올리거나, 서버를 (\w+)=1로 켜 주세요$/,
+     "'$1' is neither a registered model nor a file in the lab's folders. Upload it under Models, or start the server with $2=1"],
   ];
 
   const HANGUL = /[가-힣]/;

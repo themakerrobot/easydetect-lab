@@ -14,6 +14,8 @@ them.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import functools
 import io
 import json
@@ -23,12 +25,15 @@ import shutil
 import subprocess
 import threading
 import time
+import weakref
 import zipfile
+from collections import OrderedDict
 from pathlib import Path, PurePosixPath
 
 import yaml
 from easydetect.data.labels import label_path as shared_label_path
 from fastapi import FastAPI, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -63,7 +68,15 @@ worker = Worker(db, RUNS)
 app = FastAPI(title="easydetect lab")
 # the themaker-ui design kit and its fonts; the pages link them relatively
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
-_models: dict[str, object] = {}
+#: loaded models, least recently used first: (task, resolved path or name, mtime) -> Detector
+_models: OrderedDict[tuple, object] = OrderedDict()
+#: a few at once: each compiled model holds hundreds of MB, and a webcam session switches often
+MODEL_CACHE_SIZE = 4
+_models_lock = threading.Lock()
+#: one caller at a time per model: its first call exports and compiles lazily
+_model_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+#: seconds between two looks at a job for its progress stream
+STREAM_POLL = 1.0
 #: what training leaves beside a detector for task="pose" / "segment" to find
 SIBLING_MODELS = ("pose.onnx", "mask_decoder.onnx")
 
@@ -105,14 +118,16 @@ def label_page(dataset_id: int) -> str:
 
 
 @app.post("/api/datasets")
-async def upload_dataset(name: str = Form(...), archive: UploadFile = None):
+def upload_dataset(name: str = Form(...), archive: UploadFile = None):
     """Take a zip of images (+ labels, + data.yaml if you have one).
 
     A YOLO export from a labelling service goes in as it is: ``images/train`` +
     ``labels/train``, or ``train/images`` + ``train/labels`` with a data.yaml
     saying ``../train/images`` — the trainer resolves both. The zip is written
-    to disk as it arrives rather than held in memory, and a single wrapping
-    folder (or macOS's ``__MACOSX``) is unpacked away.
+    to disk in chunks rather than held in memory, and a single wrapping
+    folder (or macOS's ``__MACOSX``) is unpacked away. A plain ``def``: FastAPI
+    runs it in a worker thread, so unpacking a large zip does not stall the
+    other requests (the webcam, the progress stream) while it goes.
     """
     if archive is None:
         raise HTTPException(400, "no archive uploaded")
@@ -120,9 +135,7 @@ async def upload_dataset(name: str = Form(...), archive: UploadFile = None):
     target.mkdir(parents=True)
     scratch = target / ".upload.zip"
     try:
-        with open(scratch, "wb") as out:
-            while chunk := await archive.read(1 << 20):
-                out.write(chunk)
+        _save_upload(archive, scratch)
         with zipfile.ZipFile(scratch) as zf:
             _safe_extract(zf, target)
     except zipfile.BadZipFile as exc:
@@ -174,7 +187,7 @@ def _unwrap(target: Path) -> None:
 
 
 @app.post("/api/datasets/images")
-async def upload_images(
+def upload_images(
     name: str = Form(...), dataset_id: int = Form(None), files: list[UploadFile] = None
 ):
     """Take image files straight from the file picker — no zip to make first."""
@@ -185,8 +198,7 @@ async def upload_images(
     for upload in files:
         if Path(upload.filename or "").suffix.lower() not in IMG_SUFFIXES:
             continue
-        destination = _unique(target / Path(upload.filename).name)
-        destination.write_bytes(await upload.read())
+        _save_upload(upload, _unique(target / Path(upload.filename).name))
         written += 1
     if not written:
         _discard(target, dataset)
@@ -195,7 +207,7 @@ async def upload_images(
 
 
 @app.post("/api/datasets/video")
-async def upload_video(
+def upload_video(
     name: str = Form(...),
     dataset_id: int = Form(None),
     every: int = Form(30),
@@ -206,7 +218,8 @@ async def upload_video(
 
     Collection usually starts with a recording, not a folder of stills. One
     frame every ``every`` frames, up to ``max_frames`` — consecutive frames are
-    nearly identical and only cost labelling time.
+    nearly identical and only cost labelling time. Decoding runs in a worker
+    thread (a plain ``def``), not on the server's event loop.
     """
     import cv2
 
@@ -214,7 +227,7 @@ async def upload_video(
         raise HTTPException(400, "no video uploaded")
     target, dataset = _collection_target(name, dataset_id)
     scratch = target / f".{int(time.time())}_{Path(video.filename or 'clip').name}"
-    scratch.write_bytes(await video.read())
+    _save_upload(video, scratch)
 
     capture = cv2.VideoCapture(str(scratch))
     if not capture.isOpened():
@@ -245,7 +258,17 @@ async def upload_video(
 
 @app.post("/api/datasets/local")
 def add_local_dataset(payload: dict):
-    """Register a folder already on this machine, without copying it."""
+    """Register a folder already on this machine, without copying it.
+
+    Over the API only inside the lab's folders, unless the server allows any
+    path (see :func:`_allowed_path`); ``run.py label --source`` is typed at
+    this machine and goes through :func:`register_folder` directly.
+    """
+    _allowed_path(Path(str(payload.get("path", ""))))
+    return register_folder(payload)
+
+
+def register_folder(payload: dict) -> dict:
     path = Path(str(payload.get("path", ""))).expanduser()
     if not path.is_dir():
         raise HTTPException(400, f"{path} is not a folder")
@@ -266,7 +289,7 @@ def list_datasets():
 def get_dataset(dataset_id: int):
     dataset = _dataset(dataset_id)
     images_root = Path(dataset["images_dir"])
-    images = list_images(images_root)
+    images = _images(dataset)
     dataset["classes"] = json.loads(dataset["classes"])
     dataset["files"] = [_file_entry(p, images_root) for p in images]
     dataset.update(_labelling(dataset, images))
@@ -290,25 +313,26 @@ def _file_entry(image: Path, images_root: Path) -> dict:
     return {"name": image.relative_to(images_root).as_posix(), "labelled": labelled, "boxes": boxes}
 
 
+# The pages address a picture by its index in the list they loaded; ``name``
+# (optional, as the list gave it) makes a request refuse to touch another
+# picture when the folder changed in between — boxes saved onto the wrong image.
+
+
 @app.get("/api/datasets/{dataset_id}/image/{index}")
-def dataset_image(dataset_id: int, index: int):
-    dataset = _dataset(dataset_id)
-    images = list_images(Path(dataset["images_dir"]))
-    if not 0 <= index < len(images):
-        raise HTTPException(404, "no such image")
-    return FileResponse(images[index])
+def dataset_image(dataset_id: int, index: int, name: str | None = None):
+    return FileResponse(_image_at(_dataset(dataset_id), index, name))
 
 
 @app.get("/api/datasets/{dataset_id}/labels/{index}")
-def get_labels(dataset_id: int, index: int):
-    return {"boxes": read_labels(_label_file(dataset_id, index),
+def get_labels(dataset_id: int, index: int, name: str | None = None):
+    return {"boxes": read_labels(_label_file(dataset_id, index, name),
                                  _kpt_shape(_dataset(dataset_id)))}
 
 
 @app.post("/api/datasets/{dataset_id}/labels/{index}")
-def save_labels(dataset_id: int, index: int, payload: dict):
+def save_labels(dataset_id: int, index: int, payload: dict, name: str | None = None):
     """Write one image's boxes. The labelled count moves by one, not by a rescan."""
-    label = _label_file(dataset_id, index)
+    label = _label_file(dataset_id, index, name)
     first_time = not label.exists()
     write_labels(label, payload.get("boxes", []), _kpt_shape(_dataset(dataset_id)))
     if first_time:
@@ -317,38 +341,35 @@ def save_labels(dataset_id: int, index: int, payload: dict):
 
 
 @app.post("/api/datasets/{dataset_id}/autolabel/{index}")
-def autolabel_one(dataset_id: int, index: int, payload: dict):
+def autolabel_one(dataset_id: int, index: int, payload: dict, name: str | None = None):
     """Boxes for the image on screen, from a model — the first draft to correct."""
     dataset = _dataset(dataset_id)
-    images = list_images(Path(dataset["images_dir"]))
-    if not 0 <= index < len(images):
-        raise HTTPException(404, "no such image")
+    image = _image_at(dataset, index, name)
     model_name = _resolve_model(payload.get("model") or _default_model(dataset_id))
     task = _labelling(dataset)["task"]
     try:
         model = _model(model_name, task)
-        boxes = predict_boxes(
-            model, images[index], json.loads(dataset["classes"]), float(payload.get("conf", 0.35)),
-            kpt_names=keypoint_names(_data_cfg(dataset)) if task == "pose" else None,
-        )
+        with _using(model):
+            boxes = predict_boxes(
+                model, image, json.loads(dataset["classes"]), float(payload.get("conf", 0.35)),
+                kpt_names=keypoint_names(_data_cfg(dataset)) if task == "pose" else None,
+            )
     except Exception as exc:  # a missing model must not kill the page
         raise HTTPException(503, str(exc)) from exc
     return {"boxes": boxes}
 
 
 @app.post("/api/datasets/{dataset_id}/outline/{index}")
-def outline(dataset_id: int, index: int, payload: dict):
+def outline(dataset_id: int, index: int, payload: dict, name: str | None = None):
     """Outlines for boxes on the image on screen — MobileSAM draws, a person
     corrects. The dataset's own fine-tuned mask decoder, once it has one."""
     import cv2
     import numpy as np
 
     dataset = _dataset(dataset_id)
-    images = list_images(Path(dataset["images_dir"]))
-    if not 0 <= index < len(images):
-        raise HTTPException(404, "no such image")
+    image = _image_at(dataset, index, name)
     boxes = payload.get("boxes") or []
-    img = cv2.imread(str(images[index]))
+    img = cv2.imread(str(image))
     if img is None:
         raise HTTPException(400, "could not read that image")
     h, w = img.shape[:2]
@@ -425,7 +446,7 @@ def set_task(dataset_id: int, payload: dict):
     unchanged = old_shape == new_shape and mapping == list(range(len(mapping or [])))
     rewrites, outlines, kept = [], 0, 0
     if (old_shape is not None or new_shape is not None) and not unchanged:
-        for image in list_images(Path(dataset["images_dir"])):
+        for image in _images(dataset):
             label = label_path(image)
             if not label.exists():
                 continue
@@ -493,7 +514,7 @@ def dataset_stats(dataset_id: int):
     outlines = no_keypoints = 0
     unlabelled: list[str] = []
     empty: list[str] = []
-    images = list_images(images_root)
+    images = _images(dataset)
     for image in images:
         label = label_path(image)
         if not label.exists():
@@ -532,18 +553,15 @@ def dataset_stats(dataset_id: int):
 
 
 @app.delete("/api/datasets/{dataset_id}/images/{index}")
-def delete_image(dataset_id: int, index: int):
+def delete_image(dataset_id: int, index: int, name: str | None = None):
     """Drop one image and its label — blurred frames are not worth labelling."""
     dataset = _dataset(dataset_id)
-    images_root = Path(dataset["images_dir"])
-    images = list_images(images_root)
-    if not 0 <= index < len(images):
-        raise HTTPException(404, "no such image")
-    label = label_path(images[index])
-    images[index].unlink(missing_ok=True)
-    label.unlink(missing_ok=True)
+    image = _image_at(dataset, index, name)
+    image.unlink(missing_ok=True)
+    label_path(image).unlink(missing_ok=True)
+    _forget_images(dataset_id)
     worker.refresh_counts(dataset_id)
-    return {"deleted": True, "images": len(list_images(images_root))}
+    return {"deleted": True, "images": len(_images(dataset))}
 
 
 @app.post("/api/datasets/{dataset_id}/duplicate")
@@ -570,7 +588,7 @@ def export_dataset(dataset_id: int):
     dataset = _dataset(dataset_id)
     images_root = Path(dataset["images_dir"])
     arcname = {}  # image on disk -> where it goes in the zip
-    for image in list_images(images_root):
+    for image in _images(dataset):
         arcname[image.resolve()] = PurePosixPath("images", *image.relative_to(images_root).parts)
     cfg = {"train": "images", "val": "images"}
     splits = _split_lists(dataset, arcname)
@@ -619,6 +637,7 @@ def delete_dataset(dataset_id: int):
                (dataset_id,))
     db.execute("DELETE FROM jobs WHERE dataset_id = ?", (dataset_id,))
     db.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+    _forget_images(dataset_id)       # SQLite may give the id to the next dataset
     return {"deleted": True, "files_removed": removed}
 
 
@@ -671,7 +690,7 @@ def remove_class(dataset_id: int, payload: dict):
         raise HTTPException(409, f"job #{busy['id']} uses this dataset; wait for it or stop it")
 
     rewrites, removed, moved = [], 0, 0
-    for image in list_images(Path(dataset["images_dir"])):
+    for image in _images(dataset):
         path = label_path(image)
         if not path.exists():
             continue
@@ -730,7 +749,7 @@ def register_model(payload: dict):
     job = db.one("SELECT * FROM jobs WHERE id = ?", (payload.get("job_id"),))
     if job is None or not job["run_dir"]:
         raise HTTPException(404, "that job has no weights")
-    xml = next(Path(job["run_dir"]).glob("openvino/*.xml"), None)
+    xml = _main_ir(Path(job["run_dir"]))
     weights = xml or Path(job["run_dir"]) / "weights" / "best.pt"
     if not Path(weights).exists():
         raise HTTPException(404, "no weights on disk")
@@ -747,7 +766,7 @@ def register_model(payload: dict):
 
 
 @app.post("/api/models/upload")
-async def upload_model(
+def upload_model(
     name: str = Form(...),
     files: list[UploadFile] = None,
     file: UploadFile = None,
@@ -756,7 +775,8 @@ async def upload_model(
     """Bring a model in from outside — a .pt from a colleague, or an IR as .xml + .bin.
 
     An OpenVINO IR is two files that must sit together under one stem, so
-    they are taken in one upload and the .bin is named after the .xml.
+    they are taken in one upload and the .bin is named after the .xml. A
+    ``.pt`` is a pickle and runs code when loaded: only checkpoints you trust.
     """
     uploads = [u for u in [*(files or []), file] if u is not None and u.filename]
     if not uploads:
@@ -778,7 +798,7 @@ async def upload_model(
         target = folder / Path(upload.filename).name
         if upload is by_suffix.get(".bin"):
             target = path.with_suffix(".bin")  # what read_model looks for beside the .xml
-        target.write_bytes(await upload.read())
+        _save_upload(upload, target)
     model_id = db.add_model(
         name=name,
         path=str(path),
@@ -820,7 +840,7 @@ def _box_filters(iou: str | None, contain: str | None) -> dict:
 
 
 @app.post("/api/predict")
-async def batch_predict(
+def batch_predict(
     model: str = Form(...),
     conf: float = Form(0.5),
     dataset_id: int = Form(None),
@@ -831,16 +851,21 @@ async def batch_predict(
     segment: str = Form(None),
     task: str = Form(None),
 ):
-    """Queue a run over a dataset, a folder on this machine, or an uploaded video."""
+    """Queue a run over a dataset, a folder on this machine, or an uploaded video.
+
+    A path must be inside the lab's folders unless the server allows any
+    (:func:`_allowed_path`).
+    """
+    model = _resolve_model(model)        # refused before a video is copied anywhere
     if video is not None:
-        folder = DATA / "predict-input" / str(int(time.time()))
+        folder = _fresh_dir(DATA / "predict-input", "clip")
         folder.mkdir(parents=True)
         source = folder / Path(video.filename or "clip.mp4").name
-        source.write_bytes(await video.read())
+        _save_upload(video, source)
     elif dataset_id:
         source = Path(_dataset(dataset_id)["images_dir"])
     elif path:
-        source = Path(path).expanduser()
+        source = _allowed_path(Path(path)).expanduser()
         if not source.exists():
             raise HTTPException(400, f"{source} does not exist")
     else:
@@ -849,7 +874,7 @@ async def batch_predict(
     job_id = db.add_job(
         kind="predict",
         dataset_id=dataset_id or 0,
-        model=_resolve_model(model),
+        model=model,
         conf=conf,
         source=str(source),
         task=None if _task(segment, task) == "detect" else _task(segment, task),
@@ -876,6 +901,7 @@ def create_job(payload: dict):
         patience=_patience(payload.get("patience")),
         augment=None if payload.get("augment") is None else int(bool(payload["augment"])),
         device=payload.get("device") or None,
+        int8=1 if payload.get("int8") else None,
         **_optimizer_settings(payload),
     )
     return {"id": job_id}
@@ -975,10 +1001,20 @@ def _model_files(job: dict) -> dict:
     files = {}
     if (run_dir / "weights" / "best.pt").exists():
         files["weights"] = str(run_dir / "weights" / "best.pt")
-    xml = next((run_dir / "openvino").glob("*.xml"), None)
+    xml = _main_ir(run_dir)
     if xml is not None:
         files["ir"] = str(xml)
+    int8 = run_dir / "openvino" / f"{xml.stem}_int8.xml" if xml is not None else None
+    if int8 is not None and int8.exists():
+        files["ir_int8"] = str(int8)
     return files
+
+
+def _main_ir(run_dir: Path) -> Path | None:
+    """The run's full-precision IR. An INT8 one (``best_int8.xml``) may sit
+    beside it, and is only ever used when asked for by name."""
+    found = sorted((Path(run_dir) / "openvino").glob("*.xml"))
+    return next((x for x in found if not x.stem.endswith("_int8")), None)
 
 
 @app.post("/api/jobs/{job_id}/resume")
@@ -1009,6 +1045,7 @@ def resume_job(job_id: int, payload: dict = None):
         patience=job["patience"],
         augment=job["augment"],
         device=job["device"],
+        int8=job["int8"],
         **{key: job[key] for key in (*OPTIMIZER_SETTINGS, "amp")},
         detail=f"#{root} 이어서 +{max(add, 1)}에폭",
     )
@@ -1165,15 +1202,21 @@ def cancel_job(job_id: int):
 
 @app.get("/api/jobs/{job_id}/stream")
 def stream_job(job_id: int):
-    """Server-sent events: progress as it happens, then a final status."""
+    """Server-sent events: progress as it happens, then a final status.
 
-    def events():
+    An async generator: a page left open on a long run would otherwise hold a
+    worker thread asleep for hours, and a few tabs would use up the pool that
+    every plain ``def`` endpoint runs in. Only the two queries borrow a thread.
+    """
+
+    async def events():
         sent, last = 0, None
         while True:
-            job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+            job = await run_in_threadpool(db.one, "SELECT * FROM jobs WHERE id = ?", (job_id,))
             if job is None:
                 return
-            rows = db.query(
+            rows = await run_in_threadpool(
+                db.query,
                 "SELECT epoch, loss, map50_95 FROM epochs WHERE job_id = ? AND epoch > ?"
                 " ORDER BY epoch",
                 (job_id, sent),
@@ -1191,7 +1234,7 @@ def stream_job(job_id: int):
                 yield f"data: {json.dumps({'type': 'end', 'status': job['status']})}\n\n"
                 return
             yield ": keepalive\n\n"
-            time.sleep(1.0)
+            await asyncio.sleep(STREAM_POLL)
 
     return StreamingResponse(events(), media_type="text/event-stream")
 
@@ -1212,6 +1255,7 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
     if kind in ("openvino", "onnx"):
         # one export folder holds both: the IR (.xml + .bin) and the .onnx it was
         # converted from; each zip takes its own model files and the class names
+        # (the IR zip best_int8.xml + .bin too, when the run asked for one)
         model_files = (".xml", ".bin") if kind == "openvino" else (".onnx",)
         files = [p for p in sorted((run_dir / "openvino").glob("*"))
                  if p.suffix in model_files or p.name == "labels.txt"
@@ -1406,25 +1450,26 @@ def job_modelcard(job_id: int, repo: str | None = None, folder: str | None = Non
             "readme": _card(job, repo, folder, files)}
 
 
+# The two below are plain ``def``s on purpose: FastAPI runs them in a worker
+# thread. As ``async def`` the inference ran on the event loop, and every other
+# request — the next webcam frame, the progress stream — waited behind it.
+
+
 @app.post("/api/jobs/{job_id}/predict")
-async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)):
+def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)):
     """Try the trained model on one image; returns the annotated JPEG."""
     import cv2
-    import numpy as np
-
 
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or not job["run_dir"]:
         raise HTTPException(404, "that job has no weights")
-    if image is None:
-        raise HTTPException(400, "no image uploaded")
-    frame = cv2.imdecode(np.frombuffer(await image.read(), np.uint8), cv2.IMREAD_COLOR)
-    if frame is None:
-        raise HTTPException(400, "could not read that image")
+    frame = _decode_upload(image)
 
-    xml = next(Path(job["run_dir"]).glob("openvino/*.xml"), None)
+    xml = _main_ir(Path(job["run_dir"]))
     weights = str(xml or Path(job["run_dir"]) / "weights" / "best.pt")
-    result = _model(weights, _run_task(job["run_dir"]))(frame, conf=conf)[0]
+    model = _model(weights, _run_task(job["run_dir"]))
+    with _using(model):
+        result = model(frame, conf=conf)[0]
     ok, buffer = cv2.imencode(".jpg", result.plot())
     if not ok:
         raise HTTPException(500, "could not encode the result")
@@ -1436,22 +1481,19 @@ async def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)
 
 
 @app.post("/api/preview")
-async def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile = None,
-                  iou: str = Form(None), contain: str = Form(None), segment: str = Form(None),
-                  task: str = Form(None)):
+def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile = None,
+            iou: str = Form(None), contain: str = Form(None), segment: str = Form(None),
+            task: str = Form(None)):
     """One frame in, one annotated frame out — what the webcam preview posts to."""
     filters = _box_filters(iou, contain)
     import cv2
-    import numpy as np
 
-    if image is None:
-        raise HTTPException(400, "no image uploaded")
-    frame = cv2.imdecode(np.frombuffer(await image.read(), np.uint8), cv2.IMREAD_COLOR)
-    if frame is None:
-        raise HTTPException(400, "could not read that image")
+    frame = _decode_upload(image)
+    name = _resolve_model(model)
     try:
-        result = _model(_resolve_model(model), _task(segment, task))(
-            frame, conf=conf, verbose=False, **filters)[0]
+        loaded = _model(name, _task(segment, task))
+        with _using(loaded):
+            result = loaded(frame, conf=conf, verbose=False, **filters)[0]
     except Exception as exc:
         raise HTTPException(503, str(exc)) from exc
     ok, buffer = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -1546,6 +1588,19 @@ def http_error(_request, exc: HTTPException):
 # ------------------------------------------------------------------ helpers
 
 
+def _decode_upload(image: UploadFile | None):
+    """An uploaded picture as a BGR array, or a 400 saying why not."""
+    import cv2
+    import numpy as np
+
+    if image is None:
+        raise HTTPException(400, "no image uploaded")
+    frame = cv2.imdecode(np.frombuffer(image.file.read(), np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "could not read that image")
+    return frame
+
+
 def _collection_target(name: str, dataset_id: int | None) -> tuple[Path, dict | None]:
     """Where new images go: into an existing dataset, or into a fresh folder."""
     if dataset_id:
@@ -1560,6 +1615,7 @@ def _finish_collection(name: str, target: Path, dataset: dict | None, **counts) 
     """Register a new dataset, or refresh the counts of the one we added to."""
     if dataset is None:
         return {**_register(name, target.parent), **counts}
+    _forget_images(dataset["id"])
     worker.refresh_counts(dataset["id"])
     updated = _dataset(dataset["id"])
     return {
@@ -1595,13 +1651,88 @@ def _dataset(dataset_id) -> dict:
     return dataset
 
 
-def _label_file(dataset_id: int, index: int) -> Path:
-    dataset = _dataset(dataset_id)
-    images_root = Path(dataset["images_dir"])
-    images = list_images(images_root)
+def _label_file(dataset_id: int, index: int, name: str | None = None) -> Path:
+    return label_path(_image_at(_dataset(dataset_id), index, name))
+
+
+def _image_at(dataset: dict, index: int, name: str | None = None) -> Path:
+    """The picture at ``index`` — and, given its ``name``, only if it still is that one."""
+    images = _images(dataset)
     if not 0 <= index < len(images):
         raise HTTPException(404, "no such image")
-    return label_path(images[index])
+    image = images[index]
+    if name is not None and image.relative_to(dataset["images_dir"]).as_posix() != name:
+        raise HTTPException(409, "사진 목록이 바뀌었어요. 페이지를 새로 고쳐 주세요")
+    return image
+
+
+#: dataset id -> (images root, mtime of every folder under it, the sorted list)
+_image_lists: dict[int, tuple[str, dict[str, int], list[Path]]] = {}
+_image_lists_lock = threading.Lock()
+#: a folder changed this recently may change again within the same mtime tick
+#: (two seconds on FAT), so a listing of it is not trusted to stay current
+_SETTLED_NS = 2_000_000_000
+
+
+def _images(dataset: dict) -> list[Path]:
+    """``list_images`` of the dataset's pictures, kept between requests.
+
+    Every image, label and auto-label request addresses a picture by its index
+    in this list, and walking a 10,000-picture folder for each took 170 ms.
+    The list is kept per dataset and re-read when the app adds or removes
+    pictures (:func:`_forget_images`) or when any folder under the root has a
+    new mtime — a file copied in from outside — which costs one stat per
+    folder rather than one per picture.
+    """
+    root = str(dataset["images_dir"])
+    with _image_lists_lock:
+        cached = _image_lists.get(dataset["id"])
+    if cached is not None and cached[0] == root and _folders_unchanged(cached[1]):
+        return list(cached[2])
+    started = time.time_ns()
+    images, folders = _scan_images(Path(root))
+    stamps = {}
+    for folder in folders:
+        try:
+            stamps[folder] = os.stat(folder).st_mtime_ns
+        except OSError:
+            return images          # a folder went away mid-walk: answer, but keep nothing
+    if all(mtime < started - _SETTLED_NS for mtime in stamps.values()):
+        with _image_lists_lock:
+            _image_lists[dataset["id"]] = (root, stamps, images)
+    return list(images)
+
+
+def _scan_images(root: Path) -> tuple[list[Path], list[str]]:
+    """``labeling.list_images(root)``, and every folder it walked through."""
+    images, folders = [], []
+    for here, _, files in os.walk(root):   # like rglob: symlinked folders not entered
+        folders.append(here)
+        images += [Path(here, f) for f in files if Path(f).suffix.lower() in IMG_SUFFIXES]
+    return sorted(images), folders
+
+
+def _folders_unchanged(stamps: dict[str, int]) -> bool:
+    try:
+        return all(os.stat(folder).st_mtime_ns == mtime for folder, mtime in stamps.items())
+    except OSError:
+        return False
+
+
+def _forget_images(dataset_id: int) -> None:
+    with _image_lists_lock:
+        _image_lists.pop(dataset_id, None)
+
+
+def _save_upload(upload: UploadFile, destination: Path) -> None:
+    """An upload onto disk a megabyte at a time, never whole in memory.
+
+    By the time an endpoint runs, the server has already spooled the upload to
+    a temporary file; this copies it across from there.
+    """
+    upload.file.seek(0)
+    with open(destination, "wb") as out:
+        shutil.copyfileobj(upload.file, out, 1 << 20)
 
 
 def _default_model(dataset_id: int) -> str:
@@ -1621,24 +1752,104 @@ def _default_model(dataset_id: int) -> str:
 
 
 def _resolve_model(name: str) -> str:
-    """A registry id, a registry name, a mirror name, or a path — all usable."""
+    """A registry id, a registry name, a mirror name, or a path — all usable.
+
+    A path must be inside the lab's folders unless the server allows any
+    (:func:`_allowed_path`): a ``.pt`` is a pickle, and loading one runs
+    whatever code its author put in it.
+    """
     text = str(name).strip()
     row = None
     if text.isdigit():
         row = db.one("SELECT * FROM models WHERE id = ?", (int(text),))
     if row is None:
         row = db.one("SELECT * FROM models WHERE name = ?", (text,))
-    return row["path"] if row else text
+    if row is not None:
+        return row["path"]
+    from easydetect.downloads import is_model_name
+
+    if not is_model_name(text):
+        _allowed_path(Path(text), what="model")
+    return text
+
+
+#: $EASYDETECT_LAB_ALLOW_PATHS: "1" lets the API open any path on this machine;
+#: otherwise it may name more folders to allow, separated like $PATH
+ALLOW_PATHS = "EASYDETECT_LAB_ALLOW_PATHS"
+
+
+def _allowed_path(path: Path, what: str = "folder") -> Path:
+    """``path``, if the API may open it: inside the lab's data folder, a
+    registered dataset's folder, or a folder $EASYDETECT_LAB_ALLOW_PATHS names.
+
+    The lab has no login, so whoever reaches the port could otherwise point
+    "register a folder" or batch inference at any file on the machine — or a
+    planted ``.pt``, which runs code when loaded.
+    """
+    setting = os.environ.get(ALLOW_PATHS, "").strip()
+    if setting.lower() in ("1", "true", "yes", "on"):
+        return path
+    roots = [DATA, *(Path(p).expanduser() for p in setting.split(os.pathsep) if p.strip())]
+    roots += [Path(row["path"]) for row in db.query("SELECT path FROM datasets")]
+    # runs the lab wrote itself, wherever an older data folder kept them
+    roots += [Path(row["run_dir"]) for row in db.query(
+        "SELECT DISTINCT run_dir FROM jobs WHERE run_dir IS NOT NULL")]
+    try:
+        resolved = path.expanduser().resolve()
+    except (OSError, RuntimeError):     # a symlink loop, say
+        resolved = None
+    if resolved is not None and any(resolved.is_relative_to(root.resolve()) for root in roots):
+        return path
+    if what == "model":
+        raise HTTPException(403, f"'{path}'은(는) 등록한 모델도 랩 폴더 안의 파일도 아니에요."
+                                 f" 모델 탭에서 올리거나, 서버를 {ALLOW_PATHS}=1로 켜 주세요")
+    raise HTTPException(403, f"'{path}'은(는) 랩 폴더 밖이에요."
+                             f" 서버를 {ALLOW_PATHS}=1로 켜면 열 수 있어요")
+
+
+def _model_key(name: str, task: str) -> tuple:
+    """What makes two loaded models the same: the task, the file, and when the
+    file (or the .bin / .onnx / pose / mask models it reads) last changed —
+    so a run exported again is loaded again, not served from before."""
+    path = Path(name).expanduser()
+    if not path.is_file():
+        return task, name, None              # a mirror name: its download never changes
+    path = path.resolve()
+    beside = [path.with_suffix(s) for s in (".bin", ".onnx")]
+    beside += [path.parent / sibling for sibling in SIBLING_MODELS]
+    mtimes = [path.stat().st_mtime_ns]
+    for other in beside:
+        with contextlib.suppress(OSError):
+            mtimes.append(other.stat().st_mtime_ns)
+    return task, str(path), max(mtimes)
 
 
 def _model(name: str, task: str = "detect"):
-    """Compiled models are expensive; keep one per name (and task) for the session."""
+    """Compiled models are expensive: keep the last few used, per file and task."""
     from easydetect import Detector
 
-    key = f"{task}:{name}"
-    if key not in _models:
-        _models[key] = Detector(name, verbose=False, task=task)
-    return _models[key]
+    key = _model_key(name, task)
+    with _models_lock:              # requests run in threads now; load each model once
+        model = _models.get(key)
+        if model is not None:
+            _models.move_to_end(key)
+            return model
+        for stale in [k for k in _models if k[:2] == key[:2]]:
+            del _models[stale]      # the same file, before it changed
+        model = _models[key] = Detector(name, verbose=False, task=task)
+        while len(_models) > MODEL_CACHE_SIZE:
+            _models.popitem(last=False)
+    return model
+
+
+@contextlib.contextmanager
+def _using(model):
+    """Hold ``model`` for one prediction. Two threads in a model's first call
+    would both export and compile it, into the same cache folder."""
+    with _models_lock:
+        lock = _model_locks.setdefault(model, threading.Lock())
+    with lock:
+        yield model
 
 
 def _task(segment: str | None, task: str | None = None) -> str:
@@ -1671,7 +1882,7 @@ def _labelling(dataset: dict, images: list[Path] | None = None) -> dict:
     flip}) — what the labelling page draws and the trainer learns."""
     cfg = _data_cfg(dataset)
     if images is None and kpt_shape_of(cfg) is None and cfg.get("task") not in TASKS:
-        images = list_images(Path(dataset["images_dir"]))
+        images = _images(dataset)
     task = dataset_task(cfg, (label_path(i) for i in images or ()))
     out = {"task": task, "keypoints": None}
     if task == "pose":
@@ -1749,6 +1960,7 @@ def _register(name: str, root: Path, names: list[str] | None = None) -> dict:
         labelled=labelled,
         classes=class_names,
     )
+    _forget_images(dataset_id)
     return {
         "id": dataset_id,
         "images": len(images),
@@ -1759,10 +1971,9 @@ def _register(name: str, root: Path, names: list[str] | None = None) -> dict:
 
 def _highest_class_in_use(dataset: dict) -> int | None:
     """The largest class index any label file refers to, or None when unlabelled."""
-    images_root = Path(dataset["images_dir"])
     highest = None
     shape = _kpt_shape(dataset)
-    for image in list_images(images_root):
+    for image in _images(dataset):
         for row in read_labels(label_path(image), shape):
             if highest is None or row["cls"] > highest:
                 highest = row["cls"]
@@ -1778,16 +1989,11 @@ def _ensure_split(dataset: dict, val_ratio: float) -> str | None:
     at the two lists.
     """
     root = Path(dataset["path"])
-    images_root = Path(dataset["images_dir"])
     cfg = yaml.safe_load((root / "data.yaml").read_text(encoding="utf-8")) or {}
     if cfg.get("train") != cfg.get("val"):
         return None  # the dataset came with its own split; leave it alone
 
-    images = [
-        image
-        for image in list_images(images_root)
-        if label_path(image).exists()
-    ]
+    images = [image for image in _images(dataset) if label_path(image).exists()]
     if len(images) < 4:
         return f"only {len(images)} labelled images — validating on the same ones"
 
@@ -1862,7 +2068,7 @@ def _combine(sources: list[dict], name: str) -> dict:
         images_root = Path(source["images_dir"])
         remap = {i: names.index(n) for i, n in enumerate(json.loads(source["classes"]))}
         prefix = _slug(source["name"])
-        for image in list_images(images_root):
+        for image in _images(source):
             stem = f"{prefix}_{image.relative_to(images_root).as_posix().replace('/', '_')}"
             destination = _unique(target / "images" / stem)
             shutil.copy2(image, destination)

@@ -3,10 +3,15 @@
 """Start the lab.
 
     python run.py                                            # the web app
+    python run.py --host 0.0.0.0                             # ... other machines too
     python run.py label --source images/ --names can,bottle
 
 The second form registers a folder already on this machine and opens the
 labelling page on it — the quick path when all you want is to draw boxes.
+
+Only this machine can open the lab unless ``--host 0.0.0.0`` says otherwise:
+it has no login, and whoever reaches the port can upload a ``.pt`` (a pickle,
+which runs code when loaded) and start jobs on this machine.
 """
 
 from __future__ import annotations
@@ -48,7 +53,7 @@ def _serve_https(application, uvicorn, args, local: str, path: str) -> None:
 
 #: The oldest easydetect this lab works with. Checked against the code that is
 #: actually imported — an editable install's metadata can lag behind a git pull.
-EASYDETECT_AT_LEAST = "0.6.0"
+EASYDETECT_AT_LEAST = "0.7.0"
 
 
 def _which_easydetect(file: str) -> str:
@@ -83,14 +88,16 @@ def _check_easydetect() -> str:
     return f"easydetect {easydetect.__version__}: {_which_easydetect(easydetect.__file__)}"
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("mode", nargs="?", default="serve", choices=("serve", "label"))
     parser.add_argument("--source", help="label mode: folder of images to open")
     parser.add_argument("--names", help="label mode: comma-separated class names")
     parser.add_argument(
-        "--host", default="0.0.0.0",
-        help="0.0.0.0 (default) answers on every address; 127.0.0.1 keeps it to this machine",
+        "--host", default="127.0.0.1",
+        help="127.0.0.1 (default) keeps it to this machine; 0.0.0.0 answers on every "
+             "address, so other machines can open it — with no login, so only on a "
+             "network you trust",
     )
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument(
@@ -99,6 +106,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--data", help="where datasets, runs and the database live")
     parser.add_argument("--no-browser", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.data:
@@ -117,7 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.source:
             parser.error("label mode needs --source")
         application._start()  # so the folders and the worker exist before we register
-        dataset = application.add_local_dataset(
+        # typed at this machine, so any folder: the API's path rule is for the network
+        dataset = application.register_folder(
             {
                 "path": args.source,
                 "name": Path(args.source).resolve().name,
@@ -129,6 +142,12 @@ def main(argv: list[str] | None = None) -> int:
 
     where = "  (other machines: this one's IP)" if local != args.host else ""
     print(f"[lab] {url}{path}{where}")
+    if args.host in ("127.0.0.1", "localhost", "::1"):
+        print("[lab] only this machine can open it; --host 0.0.0.0 lets others in "
+              "(no login: anyone on the network could use it)")
+    else:
+        print("[lab] open to the network with no login — anyone who reaches this port can "
+              "upload models and start jobs here")
     if args.https_port:
         _serve_https(application, uvicorn, args, local, path)
     if not args.no_browser:

@@ -150,6 +150,9 @@ const api = async (path, options) => {
 };
 const post = (path, body) => api(path, { method: "POST",
   headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+// picture i of the list this page loaded — by name too, so a folder that
+// changed meanwhile is refused (409) rather than boxes landing on another picture
+const pictureUrl = (what, i) => `/api/datasets/${DATASET}/${what}/${i}?name=${encodeURIComponent(dataset.files[i].name)}`;
 
 async function boot() {
   dataset = await api(`/api/datasets/${DATASET}`);
@@ -389,10 +392,10 @@ async function load(i) {
   if (dirty) await save();
   if (boxes.length) lastBoxes = copy(boxes);
   index = i; selected = -1; history = []; poly = null;
-  boxes = (await api(`/api/datasets/${DATASET}/labels/${i}`)).boxes;
+  boxes = (await api(pictureUrl("labels", i))).boxes;
   await new Promise((done) => {
     img.onload = done;
-    img.src = `/api/datasets/${DATASET}/image/${i}?t=${Date.now()}`;
+    img.src = `${pictureUrl("image", i)}&t=${Date.now()}`;
   });
   canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
   fit(); renderFiles(); renderClasses(); renderKeypoints(); draw();
@@ -769,7 +772,7 @@ async function outline(objects) {
   if (!objects.length) { $("status").textContent = T("윤곽을 딸 상자가 없어요"); return; }
   $("sam").disabled = true; $("status").textContent = T("윤곽 따는 중…");
   try {
-    const res = await post(`/api/datasets/${DATASET}/outline/${index}`,
+    const res = await post(pictureUrl("outline", index),
       { boxes: objects.map(({ cx, cy, w, h }) => ({ cx, cy, w, h })) });
     push();
     res.outlines.forEach((points, k) => {
@@ -798,9 +801,11 @@ function copyPrevious() {
 async function save() {
   if (!dirty) return;
   dirty = false;
-  await api(`/api/datasets/${DATASET}/labels/${index}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ boxes }), keepalive: true });   // outlives a closing tab
+  try {
+    await api(pictureUrl("labels", index), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ boxes }), keepalive: true });   // outlives a closing tab
+  } catch (e) { $("status").textContent = e.message; throw e; }
   dataset.files[index].labelled = true;
   dataset.files[index].boxes = boxes.length;
   renderFiles();
@@ -815,7 +820,7 @@ function undo() {
 async function autolabel() {
   $("auto").disabled = true; $("status").textContent = T("자동 라벨 중…");
   try {
-    const res = await post(`/api/datasets/${DATASET}/autolabel/${index}`, { conf: 0.35 });
+    const res = await post(pictureUrl("autolabel", index), { conf: 0.35 });
     push(); boxes = boxes.concat(res.boxes); selected = -1; touch();
   } catch (e) { $("status").textContent = T`자동 라벨이 안 됐어요: ${e.message}`; return; }
   finally { $("auto").disabled = false; }
@@ -855,7 +860,7 @@ document.addEventListener("keyup", (e) => {
 $("drop").onclick = async () => {
   if (!confirm(T`${dataset.files[index].name} 을(를) 데이터셋에서 지울까요?`)) return;
   dirty = false;                                   // it is going away; do not save it back
-  await api(`/api/datasets/${DATASET}/images/${index}`, { method: "DELETE" });
+  await api(pictureUrl("images", index), { method: "DELETE" });
   dataset = await api(`/api/datasets/${DATASET}`);
   if (!dataset.files.length) { location.assign("../"); return; }
   renderFolders();

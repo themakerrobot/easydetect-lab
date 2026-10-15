@@ -9,9 +9,11 @@ boundary (an epoch, or an image), so nothing is killed mid-write.
 from __future__ import annotations
 
 import contextlib
+import gc
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -96,6 +98,29 @@ def _stage_scores(run_dir: Path) -> str | None:
     return " · ".join(parts) or None
 
 
+def _release_memory() -> None:
+    """Hand back what a finished job held: its model, and the GPU memory torch
+    keeps cached for reuse — which otherwise stays taken for the next job, and
+    for anything else on the card, until the process ends."""
+    gc.collect()
+    torch = sys.modules.get("torch")        # a job that never imported it holds no VRAM
+    if torch is not None and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _torch_device(device: str | None) -> str | None:
+    """A job's device as torch takes it: "0" is "cuda:0"; None lets torch pick."""
+    device = str(device or "").strip()
+    if not device:
+        return None
+    return f"cuda:{device}" if device.isdigit() else device
+
+
+#: pictures per batch when scoring a run — validation only reads, so it fits
+#: where the training batch did, several times over
+EVAL_BATCH = 8
+
+
 class Cancelled(Exception):
     """Raised inside a job to stop it cleanly."""
 
@@ -112,6 +137,17 @@ def _tail(path: Path, lines: int = 8) -> str:
 def _box_filters(job) -> dict:
     """An inference job's overlap filters, as ``predict()`` takes them; unset ones stay out."""
     return {key: job[key] for key in ("iou", "contain") if job.get(key) is not None}
+
+
+def _postprocess(boxes, scores, shape: tuple[int, int], conf: float, **filters):
+    """Raw ``(boxes cxcywh 0..1, scores)`` -> ``(N, 6)`` pixel rows, as ``predict()`` makes them.
+
+    The same steps ``predict()`` takes — threshold, sort, duplicates dropped —
+    from easydetect itself; they read nothing from the predictor they hang on.
+    """
+    from easydetect.predictor import Predictor
+
+    return Predictor.postprocess(None, boxes, scores, shape, conf, **filters)
 
 
 def _optimizer_kwargs(job) -> dict:
@@ -214,6 +250,8 @@ class Worker(threading.Thread):
             finally:
                 self.cancelled.discard(job["id"])
                 self.current = None
+                with contextlib.suppress(Exception):   # tidying up never stops the loop
+                    _release_memory()
 
     # -- the two kinds of work ---------------------------------------------
 
@@ -326,7 +364,8 @@ class Worker(threading.Thread):
         summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
         # export first: a job that says "done" must have everything it advertises
         self.db.update_job(job_id, status="exporting", progress=1.0, detail="exporting…")
-        note = self._export(model, run_dir, job_id)
+        note = self._export(model, run_dir, job_id, int8=bool(job.get("int8")),
+                            data=Path(dataset["path"]) / "data.yaml")
         note = "; ".join(n for n in (_stage_scores(run_dir), note) if n) or None
         self.db.update_job(
             job_id,
@@ -388,6 +427,10 @@ class Worker(threading.Thread):
         one side-by-side image per validation frame — truth in green, prediction
         in red — plus per-class AP, which is where "the model never sees small
         cans" actually shows up.
+
+        One pass over the pictures, on the run's own device and in batches:
+        the boxes drawn are the ones the scoring pass produced, caught on their
+        way out of the network, rather than a second prediction per picture.
         """
         import cv2
         import numpy as np
@@ -395,7 +438,6 @@ class Worker(threading.Thread):
         from easydetect.data.dataset import load_data_yaml
         from easydetect.plotting import draw_boxes
         from easydetect.results import Boxes
-        from easydetect.validator import validate_torch
 
         job_id = job["id"]
         parent = self.db.one("SELECT * FROM jobs WHERE id = ?", (job["resume_of"],))
@@ -409,16 +451,14 @@ class Worker(threading.Thread):
         model = Detector(str(weights), verbose=False)
         conf = job["conf"] or 0.5
 
-        metrics = validate_torch(
-            model.net, data_yaml, imgsz=parent["imgsz"], batch=1, device="cpu", workers=0
-        )
+        from easydetect.data.dataset import DetDataset
+
+        val = DetDataset(data_yaml, "val", parent["imgsz"], augment=False)
+        metrics, found = self._score(model, data_yaml, parent, conf, len(val.files))
         names = load_data_yaml(data_yaml)["names"]
 
         out = Path(parent["run_dir"]) / "eval"
         out.mkdir(parents=True, exist_ok=True)
-        from easydetect.data.dataset import DetDataset
-
-        val = DetDataset(data_yaml, "val", parent["imgsz"], augment=False)
         cards = []
         for i, image_path in enumerate(val.files):
             if job_id in self.cancelled:
@@ -440,15 +480,22 @@ class Worker(threading.Thread):
                 conf=False,
                 color=(110, 220, 60),  # truth is always green, whatever the class
             )
-            result = model.predict(str(image_path), conf=conf, verbose=False,
-                                   **_box_filters(job))[0]
-            painted = draw_boxes(painted, result.boxes, result.names)
+            if found is not None:
+                boxes, scores = found[i]
+                predicted = Boxes(_postprocess(boxes, scores, (height, width), conf,
+                                               **_box_filters(job)), (height, width))
+                painted = draw_boxes(painted, predicted, model.names)
+            else:  # the scoring pass could not be watched: predict this one again
+                result = model.predict(str(image_path), conf=conf, verbose=False,
+                                       **_box_filters(job))[0]
+                predicted = result.boxes
+                painted = draw_boxes(painted, predicted, result.names)
             cv2.imwrite(str(out / f"{i:04d}_{image_path.stem}.jpg"), painted)
             cards.append(
                 {
                     "file": f"{i:04d}_{image_path.stem}.jpg",
                     "truth": len(truth),
-                    "found": len(result.boxes),
+                    "found": len(predicted),
                 }
             )
             self.db.update_job(job_id, progress=(i + 1) / max(len(val.files), 1))
@@ -475,6 +522,43 @@ class Worker(threading.Thread):
                    f" · {len(cards)}장 미리보기",
             finished=time.time(),
         )
+
+    def _score(self, model, data_yaml: str, parent: dict, conf: float, count: int):
+        """``validate_torch``'s metrics, and each val picture's raw boxes and scores.
+
+        A forward hook keeps, per picture, the queries scoring at least
+        ``conf`` — a few rows, not the whole output. ``None`` for the boxes when
+        the pass did not see exactly ``count`` pictures in order, so the caller
+        falls back to predicting each one.
+        """
+        import torch
+        from easydetect.validator import validate_torch
+
+        device = _torch_device(parent.get("device"))
+        if device and device.startswith("cuda") and not torch.cuda.is_available():
+            device = "cpu"                   # trained on a card this machine no longer has
+        found: list = []
+
+        def keep(_module, _inputs, output):
+            scores = output["pred_logits"].detach().float().sigmoid()
+            boxes = output["pred_boxes"].detach().float()
+            for b in range(scores.shape[0]):
+                wanted = scores[b].max(-1).values >= conf
+                found.append((boxes[b][wanted].cpu().numpy(), scores[b][wanted].cpu().numpy()))
+
+        hook = model.net.register_forward_hook(keep)
+        try:
+            metrics = validate_torch(
+                model.net, data_yaml, imgsz=parent["imgsz"], batch=EVAL_BATCH,
+                device=device,
+                workers=min(_loader_workers(), EVAL_BATCH),
+            )
+        finally:
+            hook.remove()
+        if len(found) != count:
+            model.net.to("cpu")              # predict() exports it, and exports from the CPU
+            return metrics, None
+        return metrics, found
 
     def _predict(self, job: dict) -> None:
         """Run a model over everything in a source and keep the results.
@@ -569,10 +653,27 @@ class Worker(threading.Thread):
         labelled = sum(label_path(i).exists() for i in images)
         self.db.update_dataset(dataset_id, images=len(images), labelled=labelled)
 
-    def _export(self, model, run_dir: Path, job_id: int) -> str | None:
-        """Deployable artefacts, so a finished job is downloadable straight away."""
+    def _export(self, model, run_dir: Path, job_id: int, int8: bool = False,
+                data: Path | None = None) -> str | None:
+        """Deployable artefacts, so a finished job is downloadable straight away.
+
+        Always the FP32 IR (and the ONNX it comes from). With ``int8``, also
+        ``best_int8.xml``: quantized on pictures from the training split,
+        about twice as fast on a CPU without bfloat16 — but it can lose
+        accuracy, which is why it is asked for and never the default.
+        """
+        out = run_dir / "openvino"
         try:
-            model.export(format="openvino", out_dir=run_dir / "openvino", verbose=False)
-            return None
+            model.export(format="openvino", out_dir=out, verbose=False)
         except Exception as exc:  # a model that trained is still worth keeping
             return f"export failed: {exc}"
+        if not int8:
+            return None
+        try:
+            written = Path(model.export(format="openvino", int8=True, data=str(data),
+                                        out_dir=out, verbose=False))
+        except Exception as exc:  # nncf missing, say: the FP32 IR is still there
+            return f"INT8 export failed: {exc}"
+        # the float ONNX the INT8 IR was converted from: best.onnx again, byte for byte
+        written.with_suffix(".onnx").unlink(missing_ok=True)
+        return None

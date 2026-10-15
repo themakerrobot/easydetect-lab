@@ -8,8 +8,13 @@ the detection package, installed from PyPI; this repository is only the app.
 git clone https://github.com/themakerrobot/easydetect-lab
 cd easydetect-lab
 pip install -r requirements.txt   # easydetect[train] from PyPI, and the web server
-python run.py                     # http://<this machine>:8080, from any machine
+python run.py                     # http://127.0.0.1:8080, this machine only
+python run.py --host 0.0.0.0      # http://<this machine>:8080 from other machines too
 ```
+
+The lab has no login. `--host 0.0.0.0` lets anyone who can reach the port use
+it — upload models, read the folders it knows, start jobs — so open it only on
+a network you trust (see [Security](#security)).
 
 `pip install "easydetect[train]"` alone does not bring the web server
 (FastAPI, uvicorn); `requirements.txt` adds it. Lab changes arrive with
@@ -32,8 +37,8 @@ time it makes a `.venv` folder beside it and installs everything into it (a few
 minutes; it needs [Python](https://www.python.org/downloads/) 3.10 or newer,
 installed with *Add python.exe to PATH*); after a `git pull` that changes
 `requirements.txt` it installs again. Closing the window stops the lab.
-Windows asks once whether Python may use the network — allow it for other
-machines to reach the lab.
+It opens the lab to this PC only; `start-lab.bat --host 0.0.0.0` lets other
+machines in (Windows then asks once whether Python may use the network).
 
 PyTorch from PyPI is the CPU build on Windows. On a PC with an NVIDIA GPU,
 install the CUDA build into that folder once:
@@ -65,6 +70,9 @@ Button names below are the English ones.
    already exists: pick image files, upload a video and sample frames from it
    (interval and cap are yours), upload a zip, or register a folder already on
    this machine (`python run.py label --source photos/ --names can,bottle`).
+   From the page, a folder outside the lab's own is refused unless the server
+   was started with `EASYDETECT_LAB_ALLOW_PATHS` (see [Security](#security));
+   `run.py label --source` takes any folder.
    A YOLO-format export from a labelling service goes in as the zip it
    downloaded as — Roboflow's *YOLOv8* / *YOLOv11* TXT, say — with its classes,
    labels and train/valid split kept; *Statistics* and *Draw boxes* show it straight away.
@@ -175,12 +183,18 @@ Button names below are the English ones.
    server is somewhere else.
 8. **Take it away** — `best.pt`, the OpenVINO IR as a zip and the ONNX as a
    zip (both exported when a run finishes, each with `labels.txt`),
-   `results.csv`. The IR is for OpenVINO (Intel CPU, GPU, NPU); the ONNX runs on
+   `results.csv`. *Also make INT8* under the training form's advanced settings
+   adds `best_int8.xml` beside the IR, in the same zip: quantized on pictures
+   from the training split, about twice as fast on a CPU without bfloat16, but
+   check its accuracy before you rely on it — it is off by default (and needs
+   `pip install nncf`). The IR is for OpenVINO (Intel CPU, GPU, NPU); the ONNX runs on
    ONNX Runtime on any CPU, a Raspberry Pi included
    (`Detector("best.onnx", backend="onnxruntime")`), with the same boxes. *Register model* gives the run a name (the IR if it has
    one, otherwise the weights) and it then appears wherever a model is chosen —
    auto-labelling, batch inference, the webcam. A `.pt`, `.onnx` or IR (its
    `.xml` and `.bin` picked together) from elsewhere goes into the same list.
+   Upload only a `.pt` you trust: it is a pickle, and loading it can run any
+   code its author put in it. An `.onnx` or IR holds no code.
    *Use it in code* on a finished run gives Python, command-line and "another
    PC" (OpenVINO or ONNX) snippets with this run's paths filled in, ready to copy.
 9. **Share it** — the *Hugging Face* tab builds the folder to upload: the IR, the
@@ -223,9 +237,9 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `POST /api/datasets/{id}/duplicate` | a copy to experiment on |
 | `POST /api/datasets/merge` | `{ids, name}` — one set, class indices remapped |
 | `DELETE /api/datasets/{id}` | |
-| `POST /api/datasets/local` | `{path, name, names}` — register a folder in place |
+| `POST /api/datasets/local` | `{path, name, names}` — register a folder in place (inside the lab's folders unless `EASYDETECT_LAB_ALLOW_PATHS`) |
 | `GET /api/datasets` · `GET /api/datasets/{id}` | the second lists the images |
-| `GET`/`POST /api/datasets/{id}/labels/{index}` | read and write one image's boxes |
+| `GET`/`POST /api/datasets/{id}/labels/{index}` | read and write one image's boxes; `?name=` (the file as the list gave it) answers 409 if the list changed — the same on `image`, `autolabel`, `outline` and `DELETE images` |
 | `POST /api/datasets/{id}/autolabel/{index}` | boxes for one image, from a model |
 | `POST /api/datasets/{id}/autolabel` | queue a pass over the whole dataset |
 | `POST /api/datasets/{id}/classes` | rename or add classes; data.yaml follows, its split kept |
@@ -236,9 +250,9 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `POST /api/models` | `{job_id, name, note}` — register a finished run |
 | `POST /api/models/upload` | multipart: `name`, `files` (a .pt or .onnx, or an IR's .xml + .bin together), `classes` |
 | `DELETE /api/models/{id}` | forget it (files stay) |
-| `POST /api/predict` | multipart: `model`, `conf`, and one of `dataset_id`, `path`, `video` |
+| `POST /api/predict` | multipart: `model`, `conf`, and one of `dataset_id`, `path`, `video` (`path` and a `model` given as a path: inside the lab's folders unless `EASYDETECT_LAB_ALLOW_PATHS`) |
 | `POST /api/preview` | multipart: `model`, `conf`, `image` → annotated JPEG, one frame |
-| `POST /api/jobs` | `{dataset_id, model, epochs, imgsz, batch, freeze, device}`, optional `patience`, `augment`, `lr`, `lr_backbone_mult`, `weight_decay`, `warmup_epochs`, `seed`, `amp` |
+| `POST /api/jobs` | `{dataset_id, model, epochs, imgsz, batch, freeze, device}`, optional `patience`, `augment`, `lr`, `lr_backbone_mult`, `weight_decay`, `warmup_epochs`, `seed`, `amp`, `int8` |
 | `GET /api/jobs` · `GET /api/jobs/{id}` | the second includes per-epoch rows |
 | `GET /api/gpu` | utilisation, memory, temperature and power per GPU, from nvidia-smi |
 | `GET /api/jobs/{id}/stream` | server-sent events: progress, then a status |
@@ -270,13 +284,33 @@ Other limits worth knowing:
   the same layout, so you can label there and train here.
 * Training runs in this process, so restarting the server ends a run. Jobs left
   behind are marked failed on the next start rather than spinning forever.
-* It listens on every address (`0.0.0.0`) by default, so other machines can
-  open it — and it has no login: anyone who can reach the port can use it.
-  `--host 127.0.0.1` keeps it to this machine. Browsers only allow the webcam
-  on `https://` or `localhost`, so the same app is also served over HTTPS on
-  8443 (`--https-port`, 0 turns it off) with a certificate made on first start
-  and kept in `easydetect-lab/tls/`. The browser warns about it once; the
-  webcam tab opened over `http://` links to the HTTPS address.
+* It has no login; see [Security](#security) below. Browsers only allow the
+  webcam on `https://` or `localhost`, so the same app is also served over
+  HTTPS on 8443 (`--https-port`, 0 turns it off) with a certificate made on
+  first start and kept in `easydetect-lab/tls/` — what a webcam on another
+  machine needs once `--host 0.0.0.0` lets it in. The browser warns about it
+  once; the webcam tab opened over `http://` links to the HTTPS address.
+
+## Security
+
+There are no accounts: whoever can open the page can do everything it does.
+Three things keep that to the people you mean:
+
+* **Only this machine, by default.** `python run.py` listens on `127.0.0.1`.
+  `--host 0.0.0.0` answers on every address so other machines can use it —
+  do that on a network you trust (a lab LAN, a line PC), never one open to
+  the internet.
+* **Trusted checkpoints only.** A `.pt` is a Python pickle: loading one can run
+  whatever code was put in it. Upload (or point the lab at) checkpoints you
+  made or trust; an `.onnx` or OpenVINO IR carries no code.
+* **No arbitrary paths over the API.** A folder to register, a folder to run a
+  batch over, or a model given as a file path must be inside the lab's data
+  folder, a dataset folder already registered, or a run it made. Start the
+  server with `EASYDETECT_LAB_ALLOW_PATHS=1` to allow any path on the machine
+  (fine when only you can reach it), or with a list of folders to allow
+  (`EASYDETECT_LAB_ALLOW_PATHS=/data/shots:/mnt/line`, `;`-separated on
+  Windows). `python run.py label --source` takes any folder: it is typed at
+  the machine itself.
 
 ## Tests
 

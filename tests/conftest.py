@@ -27,3 +27,9 @@ def studio(tmp_path, monkeypatch):
         folder.mkdir(parents=True, exist_ok=True)
     # no context manager: startup never runs, so no worker picks jobs up
     return TestClient(module.app), module
+
+
+@pytest.fixture
+def open_paths(monkeypatch):
+    """The server started with EASYDETECT_LAB_ALLOW_PATHS=1: any folder on the machine."""
+    monkeypatch.setenv("EASYDETECT_LAB_ALLOW_PATHS", "1")

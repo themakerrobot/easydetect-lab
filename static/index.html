@@ -149,6 +149,8 @@
             <div><div class="pb-label">seed</div><input class="inp" id="job-seed" type="number" step="1" min="0" placeholder="0"></div>
             <div><div class="pb-label">AMP</div>
               <label class="check"><input type="checkbox" id="job-amp" checked> 혼합 정밀도 (GPU만, 빨라요)</label></div>
+            <div><div class="pb-label">INT8</div>
+              <label class="check"><input type="checkbox" id="job-int8"> INT8도 만들기 (CPU에서 약 2배 빠름, 정확도 확인 필요)</label></div>
           </div>
         </details>
         <button class="db go block" id="job-start">학습 시작</button>
@@ -754,7 +756,7 @@ $("job-start").onclick = async () => {
         augment: $("job-augment").checked,
         lr: $("job-lr").value, lr_backbone_mult: $("job-lr-bb").value,
         warmup_epochs: $("job-warmup").value, weight_decay: $("job-wd").value,
-        seed: $("job-seed").value, amp: $("job-amp").checked,
+        seed: $("job-seed").value, amp: $("job-amp").checked, int8: $("job-int8").checked,
         val_ratio: Number($("job-val").value), device: $("job-device").value })});
     say("job-msg", T`#${res.id}을(를) 대기열에 넣었어요`, "ok");
     await select(res.id);

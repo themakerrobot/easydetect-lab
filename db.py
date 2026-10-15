@@ -77,7 +77,9 @@ ADDED_JOB_COLUMNS = {"patience": "INTEGER", "augment": "INTEGER",
                      # an inference job's box filters; NULL: easydetect's defaults
                      "iou": "REAL", "contain": "REAL",
                      # "segment": masks for every box (MobileSAM); NULL: boxes only
-                     "task": "TEXT"}
+                     "task": "TEXT",
+                     # 1: export an INT8 IR beside the FP32 one; NULL: FP32 only
+                     "int8": "INTEGER"}
 
 
 class Database:

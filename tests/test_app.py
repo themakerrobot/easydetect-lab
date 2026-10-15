@@ -159,7 +159,7 @@ def test_downloads_and_predictions_wait_for_a_finished_run(studio):
     assert client.get("/api/jobs/999").status_code == 404
 
 
-def test_a_folder_already_on_this_machine_can_be_registered(studio, tmp_path):
+def test_a_folder_already_on_this_machine_can_be_registered(studio, tmp_path, open_paths):
     """The label-a-folder path: no copying, no zip."""
     import cv2
 
@@ -534,7 +534,7 @@ def test_a_model_file_can_be_brought_in_from_outside(studio):
     assert bad.status_code == 400
 
 
-def test_batch_prediction_needs_something_to_run_on(studio, tmp_path):
+def test_batch_prediction_needs_something_to_run_on(studio, tmp_path, open_paths):
     client, _ = studio
     assert client.post("/api/predict", data={"model": "dfine-s"}).status_code == 400
 
@@ -567,7 +567,7 @@ def test_the_preview_endpoint_refuses_what_it_cannot_read(studio):
     assert unreadable.status_code == 400
 
 
-def test_the_overlap_filters_reach_predict(studio, tmp_path, monkeypatch):
+def test_the_overlap_filters_reach_predict(studio, tmp_path, monkeypatch, open_paths):
     """The webcam's IoU slider and merge box arrive as predict()'s iou and contain."""
     client, module = studio
     seen = []
@@ -616,7 +616,7 @@ def test_the_overlap_filters_reach_predict(studio, tmp_path, monkeypatch):
     assert _box_filters({"iou": None, "contain": None}) == {} == _box_filters({})
 
 
-def test_the_outline_box_asks_for_masks(studio, tmp_path, monkeypatch):
+def test_the_outline_box_asks_for_masks(studio, tmp_path, monkeypatch, open_paths):
     """Ticking "outline objects" loads the model with task="segment", live and in a batch."""
     client, module = studio
     tasks = []
@@ -673,7 +673,7 @@ def test_the_model_cache_keeps_tasks_apart(studio, monkeypatch):
     module._models.clear()
 
 
-def test_a_job_without_a_dataset_still_shows_in_the_list(studio, tmp_path):
+def test_a_job_without_a_dataset_still_shows_in_the_list(studio, tmp_path, open_paths):
     """Inference over a folder belongs to no dataset; the list must still have it."""
     client, _ = studio
     folder = tmp_path / "shift"
@@ -1083,7 +1083,7 @@ def test_a_labelling_service_export_uploads_and_is_ready_to_train(studio, wrap):
     assert len(val._load_labels(val.files[0])) == 1
 
 
-def test_sibling_folders_keep_their_labels_apart(studio, tmp_path):
+def test_sibling_folders_keep_their_labels_apart(studio, tmp_path, open_paths):
     """Registered side by side, two folders used to share one ../labels/ and
     overwrite each other — while training looked for neither."""
     import cv2
