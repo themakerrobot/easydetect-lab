@@ -24,6 +24,14 @@ import webbrowser
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+
+# a path with Hangul in it must never stop the lab just because the console
+# (or a log it is redirected to) cannot show those characters
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 sys.path.insert(0, str(HERE))  # the app's own modules, without shadowing stdlib
 
 

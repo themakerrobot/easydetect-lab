@@ -29,6 +29,9 @@ rem this folder's Python only: not a Python installed on the PC, nor its package
 set "PYTHONHOME="
 set "PYTHONPATH="
 set "PYTHONNOUSERSITE=1"
+rem UTF-8 everywhere: folder names in Hangul (OneDrive\바탕 화면) print and open
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 echo [lab] 오프라인 묶음으로 시작해요. 인터넷이 없어도 돼요.
 echo [lab] 처음 켤 때는 1~2분 걸릴 수 있어요. 이 창을 닫으면 lab이 꺼져요.
