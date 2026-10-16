@@ -117,7 +117,7 @@ def test_an_archive_cannot_write_outside_its_folder(studio):
     """Zip-slip: an entry climbing out of the dataset directory is refused."""
     client, _ = studio
     response = upload(client, {"../escaped.jpg": image_bytes()})
-    assert response.status_code == 400 and "unsafe path" in response.json()["error"]
+    assert response.status_code == 400 and "위험한 경로" in response.json()["error"]
 
 
 def test_a_job_needs_a_dataset_that_exists_and_has_labels(studio):
@@ -127,7 +127,7 @@ def test_a_job_needs_a_dataset_that_exists_and_has_labels(studio):
     upload(client, {"images/a.jpg": image_bytes()}, name="unlabelled")
     dataset_id = client.get("/api/datasets").json()[0]["id"]
     response = client.post("/api/jobs", json={"dataset_id": dataset_id})
-    assert response.status_code == 400 and "labels" in response.json()["error"]
+    assert response.status_code == 400 and "라벨이 없어요" in response.json()["error"]
 
 
 def test_queueing_a_job_and_cancelling_it_before_it_runs(studio):
@@ -301,7 +301,7 @@ def test_a_dataset_can_be_deleted_unless_a_job_is_using_it(studio):
     job_id = client.post("/api/jobs", json={"dataset_id": 1}).json()["id"]
 
     blocked = client.request("DELETE", "/api/datasets/1")
-    assert blocked.status_code == 400 and "still using it" in blocked.json()["error"]
+    assert blocked.status_code == 400 and "쓰고 있어요" in blocked.json()["error"]
 
     client.post(f"/api/jobs/{job_id}/cancel")
     assert client.request("DELETE", "/api/datasets/1").json()["files_removed"] is True
@@ -541,7 +541,7 @@ def test_batch_prediction_needs_something_to_run_on(studio, tmp_path, open_paths
     missing = client.post(
         "/api/predict", data={"model": "dfine-s", "path": str(tmp_path / "nowhere")}
     )
-    assert missing.status_code == 400 and "does not exist" in missing.json()["error"]
+    assert missing.status_code == 400 and "없어요" in missing.json()["error"]
 
 
 def test_batch_prediction_over_a_dataset_is_queued_as_a_job(studio):
@@ -697,7 +697,7 @@ def test_an_archive_cannot_write_next_to_its_dataset(studio, tmp_path):
     with zipfile.ZipFile(io.BytesIO(make_zip({escape: b"x"}))) as zf:
         with pytest.raises(HTTPException) as raised:
             module._safe_extract(zf, target)
-    assert "unsafe path" in raised.value.detail
+    assert "위험한 경로" in raised.value.detail
     assert not (tmp_path / f"{target.name}-evil").exists()
 
 
@@ -895,7 +895,7 @@ def test_a_class_that_labels_still_use_cannot_be_dropped(studio):
         "data.yaml": b"names: {0: can, 1: bottle, 2: cap}\n",
     })
     refused = client.post("/api/datasets/1/classes", json={"names": ["can", "bottle"]})
-    assert refused.status_code == 400 and "class 2" in refused.json()["error"]
+    assert refused.status_code == 400 and "클래스 2" in refused.json()["error"]
 
     renamed = client.post("/api/datasets/1/classes", json={"names": ["can", "bottle", "lid"]})
     assert renamed.status_code == 200 and renamed.json()["names"][2] == "lid"

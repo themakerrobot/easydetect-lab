@@ -130,7 +130,7 @@ def upload_dataset(name: str = Form(...), archive: UploadFile = None):
     other requests (the webcam, the progress stream) while it goes.
     """
     if archive is None:
-        raise HTTPException(400, "no archive uploaded")
+        raise HTTPException(400, "zip 파일이 없어요")
     target = _fresh_dir(DATASETS, name)
     target.mkdir(parents=True)
     scratch = target / ".upload.zip"
@@ -140,7 +140,7 @@ def upload_dataset(name: str = Form(...), archive: UploadFile = None):
             _safe_extract(zf, target)
     except zipfile.BadZipFile as exc:
         shutil.rmtree(target, ignore_errors=True)
-        raise HTTPException(400, "that file is not a zip") from exc
+        raise HTTPException(400, "zip 파일이 아니에요") from exc
     finally:
         scratch.unlink(missing_ok=True)
     _unwrap(target)
@@ -192,7 +192,7 @@ def upload_images(
 ):
     """Take image files straight from the file picker — no zip to make first."""
     if not files:
-        raise HTTPException(400, "no files uploaded")
+        raise HTTPException(400, "올린 파일이 없어요")
     target, dataset = _collection_target(name, dataset_id)
     written = 0
     for upload in files:
@@ -202,7 +202,7 @@ def upload_images(
         written += 1
     if not written:
         _discard(target, dataset)
-        raise HTTPException(400, "none of those files are images")
+        raise HTTPException(400, "이미지 파일이 하나도 없어요")
     return _finish_collection(name, target, dataset, added=written)
 
 
@@ -224,7 +224,7 @@ def upload_video(
     import cv2
 
     if video is None:
-        raise HTTPException(400, "no video uploaded")
+        raise HTTPException(400, "올린 영상이 없어요")
     target, dataset = _collection_target(name, dataset_id)
     scratch = target / f".{int(time.time())}_{Path(video.filename or 'clip').name}"
     _save_upload(video, scratch)
@@ -233,7 +233,7 @@ def upload_video(
     if not capture.isOpened():
         scratch.unlink(missing_ok=True)
         _discard(target, dataset)
-        raise HTTPException(400, "could not read that video")
+        raise HTTPException(400, "영상을 읽지 못했어요")
 
     stem = _slug(Path(video.filename or "clip").stem)
     written = index = 0
@@ -252,7 +252,7 @@ def upload_video(
 
     if not written:
         _discard(target, dataset)
-        raise HTTPException(400, "that video had no frames")
+        raise HTTPException(400, "영상에 프레임이 없어요")
     return _finish_collection(name, target, dataset, added=written, scanned=index)
 
 
@@ -271,7 +271,7 @@ def add_local_dataset(payload: dict):
 def register_folder(payload: dict) -> dict:
     path = Path(str(payload.get("path", ""))).expanduser()
     if not path.is_dir():
-        raise HTTPException(400, f"{path} is not a folder")
+        raise HTTPException(400, f"{path}은(는) 폴더가 아니에요")
     names = payload.get("names") or None
     return _register(payload.get("name") or path.name, path, names=names)
 
@@ -371,7 +371,7 @@ def outline(dataset_id: int, index: int, payload: dict, name: str | None = None)
     boxes = payload.get("boxes") or []
     img = cv2.imread(str(image))
     if img is None:
-        raise HTTPException(400, "could not read that image")
+        raise HTTPException(400, "이미지를 읽지 못했어요")
     h, w = img.shape[:2]
     xyxy = np.array([[(b["cx"] - b["w"] / 2) * w, (b["cy"] - b["h"] / 2) * h,
                       (b["cx"] + b["w"] / 2) * w, (b["cy"] + b["h"] / 2) * h]
@@ -417,7 +417,7 @@ def set_task(dataset_id: int, payload: dict):
     dataset = _dataset(dataset_id)
     task = str(payload.get("task") or "detect")
     if task not in TASKS:
-        raise HTTPException(400, f"task is one of {', '.join(TASKS)}")
+        raise HTTPException(400, f"라벨 종류는 {', '.join(TASKS)} 중 하나예요")
     path, cfg = _data_yaml(dataset)
     old_shape = kpt_shape_of(cfg)
     new_shape, names, mapping = None, None, None
@@ -425,9 +425,9 @@ def set_task(dataset_id: int, payload: dict):
         entries = payload.get("keypoints") or []
         names = [str(e.get("name", "")).strip() for e in entries]
         if not names or not all(names):
-            raise HTTPException(400, "name every keypoint, and give at least one")
+            raise HTTPException(400, "키포인트마다 이름을 적어 주세요 (하나 이상)")
         if len(set(names)) != len(names):
-            raise HTTPException(400, "two keypoints have the same name")
+            raise HTTPException(400, "같은 이름의 키포인트가 두 개 있어요")
         old_k = old_shape[0] if old_shape else 0
         mapping = []
         for e in entries:
@@ -467,7 +467,8 @@ def set_task(dataset_id: int, payload: dict):
         "SELECT id FROM jobs WHERE dataset_id = ? AND kind IN ('train', 'autolabel')"
         " AND status IN ('queued', 'running', 'exporting')", (dataset_id,))
     if busy and rewrites:
-        raise HTTPException(409, f"job #{busy['id']} uses this dataset; wait for it or stop it")
+        raise HTTPException(409, f"#{busy['id']}이(가) 이 데이터셋을 쓰고 있어요."
+                                 " 끝나길 기다리거나 멈춰 주세요")
 
     for label, rows in rewrites:            # each file whole, or not at all
         scratch = label.with_name(label.name + ".tmp")
@@ -578,7 +579,7 @@ def merge_datasets(payload: dict):
     # sorted, so the class union comes out the same whatever order they were picked in
     ids = sorted({int(i) for i in payload.get("ids") or []})
     if len(ids) < 2:
-        raise HTTPException(400, "give at least two datasets to merge")
+        raise HTTPException(400, "합칠 데이터셋을 두 개 이상 골라 주세요")
     return _combine([_dataset(i) for i in ids], payload.get("name") or "merged")
 
 
@@ -628,7 +629,7 @@ def delete_dataset(dataset_id: int):
         (dataset_id,),
     )
     if running:
-        raise HTTPException(400, f"job #{running['id']} is still using it")
+        raise HTTPException(400, f"#{running['id']}이(가) 아직 이 데이터셋을 쓰고 있어요")
     path = Path(dataset["path"])
     removed = path.parent == DATASETS and path.is_dir()
     if removed:
@@ -647,13 +648,13 @@ def set_classes(dataset_id: int, payload: dict):
     dataset = _dataset(dataset_id)
     names = [str(n).strip() for n in payload.get("names", []) if str(n).strip()]
     if not names:
-        raise HTTPException(400, "give at least one class name")
+        raise HTTPException(400, "클래스 이름을 하나 이상 적어 주세요")
     highest = _highest_class_in_use(dataset)
     if highest is not None and len(names) <= highest:
         raise HTTPException(
             400,
-            f"labels already use class {highest}; keep at least {highest + 1} names "
-            f"or relabel those boxes first",
+            f"라벨이 이미 클래스 {highest}을(를) 써요. 이름을 {highest + 1}개 이상 두거나 "
+            f"그 상자부터 고쳐 주세요",
         )
     db.update_dataset(dataset_id, classes=json.dumps(names, ensure_ascii=False))
     _rename_in_data_yaml(dataset, names)
@@ -676,18 +677,19 @@ def remove_class(dataset_id: int, payload: dict):
         index = int(payload["index"])
         into = None if payload.get("into") in (None, "") else int(payload["into"])
     except (KeyError, TypeError, ValueError):
-        raise HTTPException(400, "give the class index to remove") from None
+        raise HTTPException(400, "지울 클래스 번호를 주세요") from None
     if not 0 <= index < len(names):
-        raise HTTPException(400, "no such class")
+        raise HTTPException(400, "그런 클래스가 없어요")
     if into is not None and (into == index or not 0 <= into < len(names)):
-        raise HTTPException(400, "merge into another existing class")
+        raise HTTPException(400, "있는 다른 클래스로 합쳐 주세요")
     if into is None and len(names) == 1:
-        raise HTTPException(400, "a dataset keeps at least one class")
+        raise HTTPException(400, "데이터셋에는 클래스가 하나는 있어야 해요")
     busy = db.one(
         "SELECT id FROM jobs WHERE dataset_id = ? AND kind IN ('train', 'autolabel')"
         " AND status IN ('queued', 'running', 'exporting')", (dataset["id"],))
     if busy:
-        raise HTTPException(409, f"job #{busy['id']} uses this dataset; wait for it or stop it")
+        raise HTTPException(409, f"#{busy['id']}이(가) 이 데이터셋을 쓰고 있어요."
+                                 " 끝나길 기다리거나 멈춰 주세요")
 
     rewrites, removed, moved = [], 0, 0
     for image in _images(dataset):
@@ -748,11 +750,11 @@ def register_model(payload: dict):
     """Give a trained run a name, so it can be picked like any other model."""
     job = db.one("SELECT * FROM jobs WHERE id = ?", (payload.get("job_id"),))
     if job is None or not job["run_dir"]:
-        raise HTTPException(404, "that job has no weights")
+        raise HTTPException(404, "이 작업에는 가중치가 없어요")
     xml = _main_ir(Path(job["run_dir"]))
     weights = xml or Path(job["run_dir"]) / "weights" / "best.pt"
     if not Path(weights).exists():
-        raise HTTPException(404, "no weights on disk")
+        raise HTTPException(404, "가중치 파일이 없어요")
     dataset = db.one("SELECT * FROM datasets WHERE id = ?", (job["dataset_id"],))
     model_id = db.add_model(
         name=str(payload.get("name") or f"job{job['id']}"),
@@ -780,14 +782,14 @@ def upload_model(
     """
     uploads = [u for u in [*(files or []), file] if u is not None and u.filename]
     if not uploads:
-        raise HTTPException(400, "no file uploaded")
+        raise HTTPException(400, "올린 파일이 없어요")
     by_suffix = {Path(u.filename).suffix.lower(): u for u in uploads}
     suffix = next((s for s in (".pt", ".onnx", ".xml") if s in by_suffix), None)
     if suffix is None:
-        raise HTTPException(400, "expected a .pt, a .onnx, or an IR's .xml and .bin")
+        raise HTTPException(400, ".pt, .onnx, 또는 IR의 .xml과 .bin을 올려 주세요")
     if suffix == ".xml" and ".bin" not in by_suffix:
         raise HTTPException(
-            400, "an OpenVINO IR is two files — pick the .xml and its .bin together"
+            400, "OpenVINO IR은 파일 두 개예요. .xml과 .bin을 함께 골라 주세요"
         )
 
     folder = _fresh_dir(DATA / "models", name)
@@ -813,7 +815,7 @@ def upload_model(
 def delete_model(model_id: int):
     model = db.one("SELECT * FROM models WHERE id = ?", (model_id,))
     if model is None:
-        raise HTTPException(404, "no such model")
+        raise HTTPException(404, "그런 모델이 없어요")
     db.execute("DELETE FROM models WHERE id = ?", (model_id,))
     return {"deleted": True}
 
@@ -832,9 +834,9 @@ def _box_filters(iou: str | None, contain: str | None) -> dict:
         try:
             value = float(value)
         except ValueError:
-            raise HTTPException(400, f"{key} must be a number") from None
+            raise HTTPException(400, f"{key}은(는) 숫자여야 해요") from None
         if not 0 < value <= 1:
-            raise HTTPException(400, f"{key} must be above 0 and at most 1")
+            raise HTTPException(400, f"{key}은(는) 0보다 크고 1 이하여야 해요")
         out[key] = value
     return out
 
@@ -867,9 +869,9 @@ def batch_predict(
     elif path:
         source = _allowed_path(Path(path)).expanduser()
         if not source.exists():
-            raise HTTPException(400, f"{source} does not exist")
+            raise HTTPException(400, f"{source}이(가) 없어요")
     else:
-        raise HTTPException(400, "give a dataset, a path, or a video")
+        raise HTTPException(400, "데이터셋, 폴더 경로, 영상 중 하나를 주세요")
     filters = _box_filters(iou, contain)
     job_id = db.add_job(
         kind="predict",
@@ -887,16 +889,18 @@ def batch_predict(
 def create_job(payload: dict):
     dataset = _dataset(payload.get("dataset_id"))
     if not dataset["labelled"]:
-        raise HTTPException(400, "that dataset has no labels yet")
+        raise HTTPException(400, "이 데이터셋에는 아직 라벨이 없어요")
+    # checked before anything is written: a run that cannot start must not be queued
+    epochs, imgsz, batch = _run_shape(payload)
     note = _ensure_split(dataset, float(payload.get("val_ratio", 0.2)))
     job_id = db.add_job(
         kind="train",
         detail=note,
         dataset_id=dataset["id"],
         model=_resolve_model(payload.get("model", "dfine-s")),
-        epochs=int(payload.get("epochs", 50)),
-        imgsz=int(payload.get("imgsz", 640)),
-        batch=int(payload.get("batch", 4)),
+        epochs=epochs,
+        imgsz=imgsz,
+        batch=batch,
         freeze=payload.get("freeze") or None,
         patience=_patience(payload.get("patience")),
         augment=None if payload.get("augment") is None else int(bool(payload["augment"])),
@@ -905,6 +909,45 @@ def create_job(payload: dict):
         **_optimizer_settings(payload),
     )
     return {"id": job_id}
+
+
+#: Input sizes a run may ask for: the network halves its input five times, so
+#: a size must divide by 32; past 2048 a picture no longer fits a training batch.
+IMGSZ_RANGE = (32, 2048)
+#: More epochs or a bigger batch than this is a typo, not a plan.
+MAX_EPOCHS, MAX_BATCH = 10000, 1024
+
+
+def _whole(payload: dict, key: str, default: int, label: str) -> int:
+    value = payload.get(key, default)
+    if value in (None, ""):
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{label}: 정수로 적어 주세요") from None
+    if not number.is_integer():
+        raise HTTPException(400, f"{label}: 정수로 적어 주세요")
+    return int(number)
+
+
+def _run_shape(payload: dict) -> tuple[int, int, int]:
+    """A training run's epochs, input size and batch, refused when they cannot work.
+
+    A negative or zero epoch count used to be queued and fail inside the
+    trainer a minute later; the form says why now, before anything is written.
+    """
+    epochs = _whole(payload, "epochs", 50, "에폭")
+    if not 1 <= epochs <= MAX_EPOCHS:
+        raise HTTPException(400, f"에폭은 1에서 {MAX_EPOCHS} 사이여야 해요")
+    batch = _whole(payload, "batch", 4, "배치")
+    if not 1 <= batch <= MAX_BATCH:
+        raise HTTPException(400, f"배치는 1에서 {MAX_BATCH} 사이여야 해요")
+    imgsz = _whole(payload, "imgsz", 640, "입력 크기")
+    low, high = IMGSZ_RANGE
+    if imgsz % 32 or not low <= imgsz <= high:
+        raise HTTPException(400, f"입력 크기는 32의 배수로, {low}에서 {high} 사이여야 해요")
+    return epochs, imgsz, batch
 
 
 #: Optimizer settings a run may set, with the range each must fall in. Left
@@ -928,9 +971,9 @@ def _optimizer_settings(payload: dict) -> dict:
         try:
             value = kind(value)
         except (TypeError, ValueError):
-            raise HTTPException(400, f"{key} must be a number") from None
+            raise HTTPException(400, f"{key}은(는) 숫자여야 해요") from None
         if not low <= value <= high:
-            raise HTTPException(400, f"{key} must be between {low:g} and {high:g}")
+            raise HTTPException(400, f"{key}은(는) {low:g}에서 {high:g} 사이여야 해요")
         out[key] = value
     if payload.get("amp") is not None:
         out["amp"] = int(bool(payload["amp"]))
@@ -943,7 +986,7 @@ def _patience(value) -> int | None:
         return None                       # the trainer's own default
     value = int(value)
     if value < 0:
-        raise HTTPException(400, "patience must be 0 (off) or more")
+        raise HTTPException(400, "patience는 0(끄기) 이상이어야 해요")
     return value
 
 
@@ -951,10 +994,23 @@ def _patience(value) -> int | None:
 def list_jobs():
     # LEFT JOIN: an inference job over a folder or an uploaded video belongs to
     # no dataset, and an inner join would drop it out of the list entirely
-    return db.query(
+    return [_split_detail(job) for job in db.query(
         "SELECT j.*, d.name AS dataset FROM jobs j"
         " LEFT JOIN datasets d ON d.id = j.dataset_id ORDER BY j.id DESC"
-    )
+    )]
+
+
+def _split_detail(job: dict) -> dict:
+    """A failure in one line, and the log it came with apart in ``log_tail``.
+
+    Rows written before ``log_tail`` existed carry both in ``detail``,
+    joined by " — " and the log's lines by " / "; they are split the same way.
+    """
+    detail = job.get("detail") or ""
+    if job.get("status") == "failed" and not job.get("log_tail") and " — " in detail:
+        head, tail = detail.split(" — ", 1)
+        job["detail"], job["log_tail"] = head, tail.replace(" / ", "\n")
+    return job
 
 
 @app.get("/api/jobs/{job_id}")
@@ -965,7 +1021,8 @@ def get_job(job_id: int):
         (job_id,),
     )
     if job is None:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, "그런 작업이 없어요")
+    _split_detail(job)
     job["epochs_done"] = db.query(
         "SELECT epoch, loss, map50_95, seconds FROM epochs WHERE job_id = ? ORDER BY epoch",
         (job_id,),
@@ -1026,13 +1083,15 @@ def resume_job(job_id: int, payload: dict = None):
     """
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or job["kind"] != "train":
-        raise HTTPException(404, "no such training job")
+        raise HTTPException(404, "그런 학습 작업이 없어요")
     if job["status"] in ("queued", "running", "exporting"):
-        raise HTTPException(400, "that job is still going")
+        raise HTTPException(400, "작업이 아직 돌고 있어요")
     root = job["resume_of"] or job_id
     if not (RUNS / f"job{root}" / "weights" / "last.pt").exists():
-        raise HTTPException(400, "no last.pt to resume from")
-    add = int((payload or {}).get("add_epochs", 10))
+        raise HTTPException(400, "이어서 학습할 last.pt가 없어요")
+    add = _whole(payload or {}, "add_epochs", 10, "더 할 에폭")
+    if not 1 <= add <= MAX_EPOCHS:
+        raise HTTPException(400, f"더 할 에폭은 1에서 {MAX_EPOCHS} 사이여야 해요")
     new_id = db.add_job(
         kind="train",
         resume_of=root,
@@ -1057,7 +1116,7 @@ def evaluate_job(job_id: int, payload: dict = None):
     """Queue a scoring pass over the validation split, with pictures."""
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or not job["run_dir"]:
-        raise HTTPException(404, "that job has no weights")
+        raise HTTPException(404, "이 작업에는 가중치가 없어요")
     new_id = db.add_job(
         kind="evaluate",
         resume_of=job_id,
@@ -1073,10 +1132,10 @@ def job_report(job_id: int):
     """The evaluation report, if this run has one."""
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or not job["run_dir"]:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, "그런 작업이 없어요")
     report = Path(job["run_dir"]) / "eval" / "report.json"
     if not report.exists():
-        raise HTTPException(404, "not evaluated yet")
+        raise HTTPException(404, "아직 평가하지 않았어요")
     return json.loads(report.read_text(encoding="utf-8"))
 
 
@@ -1088,7 +1147,7 @@ def job_predictions(job_id: int, limit: int = 60):
     """
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or job["kind"] != "predict" or not job["run_dir"]:
-        raise HTTPException(404, "no inference results")
+        raise HTTPException(404, "추론 결과가 없어요")
     run_dir = Path(job["run_dir"])
     results = run_dir / "results.json"
     if results.exists():
@@ -1115,11 +1174,11 @@ def job_output(job_id: int, name: str):
     """One drawn frame from an inference run."""
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or not job["run_dir"]:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, "그런 작업이 없어요")
     folder = (Path(job["run_dir"]) / "images").resolve()
     path = (folder / name).resolve()
     if not path.is_file() or not path.is_relative_to(folder):
-        raise HTTPException(404, "no such image")
+        raise HTTPException(404, "그런 이미지가 없어요")
     return FileResponse(path)
 
 
@@ -1127,10 +1186,10 @@ def job_output(job_id: int, name: str):
 def eval_image(job_id: int, name: str):
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or not job["run_dir"]:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, "그런 작업이 없어요")
     path = (Path(job["run_dir"]) / "eval" / name).resolve()
     if not path.is_file() or not path.is_relative_to(Path(job["run_dir"]).resolve()):
-        raise HTTPException(404, "no such image")
+        raise HTTPException(404, "그런 이미지가 없어요")
     return FileResponse(path)
 
 
@@ -1146,7 +1205,7 @@ def delete_job(job_id: int):
     """
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, "그런 작업이 없어요")
     ids = [job_id]
     if job["kind"] == "train":                 # everything resumed or scored from it, any depth
         frontier = [job_id]
@@ -1188,7 +1247,7 @@ def delete_job(job_id: int):
 def cancel_job(job_id: int):
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, "그런 작업이 없어요")
     if job["status"] == "queued":
         db.update_job(job_id, status="cancelled", finished=time.time())
     elif job["status"] == "running":
@@ -1245,12 +1304,12 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
     folder_in_repo = folder
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or not job["run_dir"]:
-        raise HTTPException(404, "nothing to download yet")
+        raise HTTPException(404, "아직 받을 파일이 없어요")
     run_dir = Path(job["run_dir"])
     if kind == "weights":
         path = run_dir / "weights" / "best.pt"
         if not path.exists():
-            raise HTTPException(404, "no weights")
+            raise HTTPException(404, "가중치가 없어요")
         return FileResponse(path, filename=f"job{job_id}-best.pt")
     if kind in ("openvino", "onnx"):
         # one export folder holds both: the IR (.xml + .bin) and the .onnx it was
@@ -1261,7 +1320,8 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
                  if p.suffix in model_files or p.name == "labels.txt"
                  or p.name.endswith(".names.json") or p.name in SIBLING_MODELS]
         if not any(p.suffix in model_files for p in files):
-            raise HTTPException(404, "no exported IR" if kind == "openvino" else "no exported ONNX")
+            raise HTTPException(
+                404, "내보낸 IR이 없어요" if kind == "openvino" else "내보낸 ONNX가 없어요")
         archive = run_dir / f"job{job_id}-{kind}.zip"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
             for p in files:
@@ -1275,26 +1335,26 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
     if kind == "results":
         path = run_dir / "results.csv"
         if not path.exists():
-            raise HTTPException(404, "no results yet")
+            raise HTTPException(404, "아직 결과가 없어요")
         return FileResponse(path, filename=f"job{job_id}-results.csv")
     if kind == "predictions":
         folder = run_dir / "images"
         if not folder.is_dir():
-            raise HTTPException(404, "no predictions")
+            raise HTTPException(404, "추론 결과가 없어요")
         shutil.copy2(run_dir / "results.json", folder / "results.json")
         archive = shutil.make_archive(str(run_dir / f"job{job_id}-predictions"), "zip", folder)
         return FileResponse(archive, filename=f"job{job_id}-predictions.zip")
     if kind == "video":
         path = run_dir / "annotated.mp4"
         if not path.exists():
-            raise HTTPException(404, "no annotated video")
+            raise HTTPException(404, "결과 영상이 없어요")
         return FileResponse(path, filename=f"job{job_id}-annotated.mp4")
     if kind == "log":
         path = run_dir / "train.log"
         if not path.exists():
-            raise HTTPException(404, "no log")
+            raise HTTPException(404, "로그가 없어요")
         return FileResponse(path, filename=f"job{job_id}-train.log", media_type="text/plain")
-    raise HTTPException(404, "unknown artefact")
+    raise HTTPException(404, "모르는 파일 종류예요")
 
 
 # ---------------------------------------------------------------- Hugging Face
@@ -1423,10 +1483,10 @@ def _hub_files(job: dict, pt: bool) -> list[Path]:
 def _hub_bundle(job: dict, repo: str | None, folder: str | None, pt: bool):
     """The folder to upload as it is: IR, ONNX, labels, the card — and best.pt if asked."""
     if job["kind"] != "train":
-        raise HTTPException(400, "only a training run has a model to share")
+        raise HTTPException(400, "공유할 모델은 학습 작업에만 있어요")
     files = _hub_files(job, pt)
     if not any(p.suffix == ".xml" for p in files):
-        raise HTTPException(404, "no exported IR — export failed or the run is still going")
+        raise HTTPException(404, "내보낸 IR이 없어요. 내보내기가 실패했거나 아직 학습 중이에요")
     folder = folder or _hub_folder(job)
     name = folder.strip("/").rsplit("/", 1)[-1] or f"job{job['id']}"
     archive = Path(job["run_dir"]) / f"{name}.zip"
@@ -1443,7 +1503,7 @@ def job_modelcard(job_id: int, repo: str | None = None, folder: str | None = Non
     """The README.md a Hugging Face upload of this run would carry, plus where it would go."""
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or job["kind"] != "train" or not job["run_dir"]:
-        raise HTTPException(404, "no trained model here")
+        raise HTTPException(404, "학습한 모델이 없어요")
     folder = folder or _hub_folder(job)
     files = [p.name for p in _hub_files(job, pt)]
     return {"repo": repo or _hub_repo(), "folder": folder, "files": files + ["README.md"],
@@ -1462,7 +1522,7 @@ def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)):
 
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None or not job["run_dir"]:
-        raise HTTPException(404, "that job has no weights")
+        raise HTTPException(404, "이 작업에는 가중치가 없어요")
     frame = _decode_upload(image)
 
     xml = _main_ir(Path(job["run_dir"]))
@@ -1472,7 +1532,7 @@ def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)):
         result = model(frame, conf=conf)[0]
     ok, buffer = cv2.imencode(".jpg", result.plot())
     if not ok:
-        raise HTTPException(500, "could not encode the result")
+        raise HTTPException(500, "결과 이미지를 만들지 못했어요")
     return StreamingResponse(
         io.BytesIO(buffer.tobytes()),
         media_type="image/jpeg",
@@ -1498,7 +1558,7 @@ def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile =
         raise HTTPException(503, str(exc)) from exc
     ok, buffer = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 80])
     if not ok:
-        raise HTTPException(500, "could not encode the result")
+        raise HTTPException(500, "결과 이미지를 만들지 못했어요")
     return StreamingResponse(
         io.BytesIO(buffer.tobytes()),
         media_type="image/jpeg",
@@ -1594,10 +1654,10 @@ def _decode_upload(image: UploadFile | None):
     import numpy as np
 
     if image is None:
-        raise HTTPException(400, "no image uploaded")
+        raise HTTPException(400, "올린 이미지가 없어요")
     frame = cv2.imdecode(np.frombuffer(image.file.read(), np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
-        raise HTTPException(400, "could not read that image")
+        raise HTTPException(400, "이미지를 읽지 못했어요")
     return frame
 
 
@@ -1641,13 +1701,13 @@ def _unique(path: Path) -> Path:
         candidate = path.with_name(f"{path.stem}_{i}{path.suffix}")
         if not candidate.exists():
             return candidate
-    raise HTTPException(400, f"too many files named {path.name}")
+    raise HTTPException(400, f"이름이 {path.name}인 파일이 너무 많아요")
 
 
 def _dataset(dataset_id) -> dict:
     dataset = db.one("SELECT * FROM datasets WHERE id = ?", (dataset_id,))
     if dataset is None:
-        raise HTTPException(404, "no such dataset")
+        raise HTTPException(404, "그런 데이터셋이 없어요")
     return dataset
 
 
@@ -1659,7 +1719,7 @@ def _image_at(dataset: dict, index: int, name: str | None = None) -> Path:
     """The picture at ``index`` — and, given its ``name``, only if it still is that one."""
     images = _images(dataset)
     if not 0 <= index < len(images):
-        raise HTTPException(404, "no such image")
+        raise HTTPException(404, "그런 이미지가 없어요")
     image = images[index]
     if name is not None and image.relative_to(dataset["images_dir"]).as_posix() != name:
         raise HTTPException(409, "사진 목록이 바뀌었어요. 페이지를 새로 고쳐 주세요")
@@ -1920,7 +1980,7 @@ def _register(name: str, root: Path, names: list[str] | None = None) -> dict:
     if not images:
         if root.parent == DATASETS:
             shutil.rmtree(root, ignore_errors=True)
-        raise HTTPException(400, "no images found")
+        raise HTTPException(400, "이미지를 찾지 못했어요")
     images_root = _common_parent(images)
     labels_root = labels_beside(images_root)
 
@@ -2055,8 +2115,8 @@ def _combine(sources: list[dict], name: str) -> dict:
     labelling = {(tuple(kpt_shape_of(c) or ()), tuple(keypoint_names(c) or ()))
                  for c in map(_data_cfg, sources)}
     if len(labelling) > 1:
-        raise HTTPException(400, "these datasets have different keypoints; "
-                                 "give them the same keypoints first")
+        raise HTTPException(400, "데이터셋마다 키포인트가 달라요. "
+                                 "먼저 같은 키포인트로 맞춰 주세요")
     first = _data_cfg(sources[0])
     shape = kpt_shape_of(first)
 
@@ -2155,7 +2215,7 @@ def _safe_extract(zf: zipfile.ZipFile, target: Path) -> None:
     for member in zf.infolist():
         # is_relative_to, not startswith: "…/set-evil" starts with "…/set"
         if not (target / member.filename).resolve().is_relative_to(root):
-            raise HTTPException(400, f"unsafe path in archive: {member.filename}")
+            raise HTTPException(400, f"zip 안에 위험한 경로가 있어요: {member.filename}")
     zf.extractall(target)
 
 

@@ -1,6 +1,26 @@
 /* easydetect platform — what the themaker-ui kit does not cover.
-   Kit tokens only: no new colours, fonts or gradients. The kit itself
-   (css/themaker-ui.css) is a verbatim copy and is never edited here. */
+   Kit tokens only: no new colours, fonts or gradients — except the dark
+   palette at the end, which redefines the same tokens for a dark screen.
+   The kit itself (css/themaker-ui.css) is a verbatim copy and is never
+   edited here; where it needs to differ, a rule below overrides it. */
+
+/* only Pretendard ships with the lab: the kit's Gowun fonts are not here, and
+   naming one first switches the text to it on a machine that happens to have it.
+   Code keeps a monospace face for Latin and falls back to Pretendard for Hangul. */
+:root{
+  --sans:'Pretendard Variable',Pretendard,-apple-system,'Segoe UI',sans-serif;
+  --serif:var(--sans);
+  --mono:ui-monospace,'SF Mono','Cascadia Mono',Consolas,'DejaVu Sans Mono','Liberation Mono',Menlo,
+         'Pretendard Variable',monospace;
+  --stage:var(--panel2);                     /* behind the picture being labelled */
+  --toast-bg:#233642; --toast-ink:#fff;
+  color-scheme:light;
+}
+header{background:var(--panel)}
+#toast,.toast{background:var(--toast-bg);color:var(--toast-ink)}
+/* Korean wraps between words, not inside them */
+body{word-break:keep-all;overflow-wrap:break-word}
+pre,code,.mono{word-break:normal}
 
 [hidden]{display:none !important}           /* a flex rule must not beat hidden */
 a{color:var(--acc-ink)}
@@ -87,7 +107,9 @@ a.db{text-decoration:none}
 .job{margin-top:6px}
 .job:first-child{margin-top:0}
 .job .sub{font-size:11px;color:var(--ink3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.job .sub.err{color:var(--warn);white-space:normal}
+/* a failure: two lines at most here; the whole of it is in the job panel */
+.job .sub.err{color:var(--warn);white-space:normal;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical}
 .job .track{margin-top:7px}
 .state{font-size:11px;font-weight:700;color:var(--ink3);flex-shrink:0}
 .state.running,.state.exporting,.state.queued{color:var(--acc-ink)}
@@ -187,7 +209,7 @@ img#preview{max-width:100%;border-radius:8px;border:1px solid var(--line);margin
 .file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pan > .ph.tools{flex-wrap:wrap;gap:6px;padding:8px 10px}
 .tools .sep{width:1px;height:20px;background:var(--line-soft);margin:0 3px}
-.stage{flex:1;min-height:0;overflow:auto;display:grid;place-items:center;padding:16px;background:var(--panel2)}
+.stage{flex:1;min-height:0;overflow:auto;display:grid;place-items:center;padding:16px;background:var(--stage)}
 .stage canvas{touch-action:none;cursor:crosshair;border:1px solid var(--line);border-radius:2px}
 .keys{padding:8px 13px;border-top:1px solid var(--line-soft);color:var(--ink3);font-size:11px;line-height:1.9;flex-shrink:0}
 kbd{background:var(--panel);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;
@@ -195,4 +217,169 @@ kbd{background:var(--panel);border:1px solid var(--line);border-bottom-width:2px
 @media (max-width:1100px){
   .label-main .pan-wide{min-height:70vh}
   .label-side .files{max-height:30vh;overflow:auto}
+}
+
+/* ═════════════════════ added with the design review ═════════════════════ */
+
+/* ── stacked screens: every panel full width (the fixed widths above are
+      for the three columns side by side, and would beat the kit's 100%) ── */
+@media (max-width:1100px){
+  .pan-side,.pan-out,.label-side{width:100%}
+  .label-main .pan-wide{order:-1}           /* the picture first, its lists after */
+}
+
+/* ── a readable floor: hints and controls a step up on a desktop
+      (the kit's phone sizes, under 700px, are left as they are) ── */
+@media (min-width:701px){
+  .hint{font-size:12px}
+  .lead{font-size:12.5px}
+  .msg{font-size:12.5px}
+  .small,.chip,.state,.job .sub,.legend{font-size:12px}
+  .pb-label,.sec2 .st{font-size:11.5px}
+  .db{font-size:13px}
+  .db.sm{font-size:12px}
+  .inp{font-size:13px}
+  .navlink{font-size:13px}
+  .keys{font-size:12px}
+  .card .meta,.facts div{font-size:12.5px}
+}
+label.pb-label{display:block}
+.help{margin-top:6px}
+.help{margin-left:24px}
+.help > summary{margin-top:0;font-size:12px;font-weight:600;color:var(--acc-ink);display:list-item;width:fit-content}
+.help[open] > summary{margin-bottom:2px}
+
+/* ── focus that can be seen, on everything that takes it ── */
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.inp:focus{box-shadow:0 0 0 3px var(--acc-soft)}
+.inp.bad{border-color:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 20%,transparent)}
+input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:4px}
+
+/* ── a touch screen has no hover: a tapped button must not look pressed ── */
+@media (hover:none){
+  .db:not(.on):not(.go):not(.warn):hover{border-color:var(--line);color:var(--ink2);background:var(--panel)}
+  .db.danger:hover{color:var(--ink3);border-color:var(--line)}
+  .db.go:hover{background:var(--acc);border-color:var(--acc)}
+  .cls:not(.on):hover,.mradio:not(.on):hover{border-color:var(--line)}
+  .navlink:not(.on):hover{border-bottom-color:transparent;color:var(--ink2)}
+}
+
+/* ── phones: the tabs get a row of their own, so nothing hides off-screen ── */
+@media (max-width:700px){
+  header{flex-wrap:wrap;height:auto;min-height:54px;padding:6px 10px;row-gap:2px;overflow:visible}
+  header h1{height:42px}
+  header nav{order:3;width:100%;align-self:auto;overflow-x:auto;scrollbar-width:none}
+  header nav::-webkit-scrollbar{display:none}
+  header nav .navlink{height:40px}
+  .label-head h1{display:none}              /* the back button says where you are from */
+  .label-head .crumb{max-width:30vw}
+  /* a long status gives way before the language button does */
+  header h1{flex-shrink:0}
+  #status{min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;max-width:30vw}
+  .label-head #status{max-width:24vw}
+  header > .grow{flex:1 1 0;min-width:0}
+}
+.badge{white-space:nowrap}
+
+/* ── the steps, once every one is done, step aside ── */
+.steps-done{display:flex;align-items:center;gap:8px;padding:6px 16px;font-size:12px;color:var(--ok);
+  font-weight:600;border-bottom:1px solid var(--line-soft)}
+
+/* ── jobs, files, rows: buttons, so a keyboard reaches them ── */
+button.job{display:block;width:100%;text-align:left;font:inherit;color:inherit;background:var(--panel)}
+.job .sub,.job .track{display:block}
+.job .model{color:var(--ink2)}
+button.file{width:100%;border:0;background:none;font:inherit;text-align:left}
+.file .n{margin-left:auto;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums;flex-shrink:0}
+.file[aria-current="true"] .n{color:var(--acc-ink)}
+
+/* ── the label page's header: the dataset is a name, not a tab ── */
+.crumb{font-size:13px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding-left:4px;min-width:0}
+
+/* ── classes: the key on the left, the count labelled ── */
+.cls .top .key{order:-1}
+.cls .ct.count{font-weight:600}
+.objs{margin-top:6px}
+.obj{display:flex;align-items:center;gap:7px;width:100%;padding:4px 8px;border:0;border-radius:6px;background:none;
+  font:inherit;font-size:12px;color:var(--ink2);text-align:left;cursor:pointer}
+.obj:hover{background:var(--panel2)}
+.obj[aria-current="true"]{background:var(--acc-soft);color:var(--acc-ink);font-weight:700}
+.obj .n{margin-left:auto;color:var(--ink3);font-size:11px}
+.kpt-count{font-weight:600;color:var(--ink3);text-transform:none;letter-spacing:0}
+.cls.kpt .ct{font-size:13px;line-height:1}
+.tools .zoom{display:inline-flex;align-items:center;gap:4px}
+.tools .zoom output{min-width:44px;text-align:center;font-size:12px;font-weight:700;color:var(--ink2);
+  font-variant-numeric:tabular-nums}
+/* the keyboard help is for a keyboard: not on a touch screen or a phone */
+@media (pointer:coarse){.keys{display:none}}
+@media (max-width:700px){
+  .keys{display:none}
+  .label-main .pan-wide{min-height:0}
+  .label-main .stage{flex:none}             /* its height follows the picture (fit() in label.html) */
+}
+
+/* ── the training form's advanced part: a checkbox gets a whole row, and an
+      optimizer value you typed is marked (empty means easydetect decides) ── */
+.grid2 .wide{grid-column:1/-1}
+.grid2 .wide select.inp{width:100%}
+#adv .inp[placeholder]:not(:placeholder-shown){border-color:var(--acc);background:var(--acc-soft)}
+
+/* ── menus that would run off the bottom open upwards ── */
+.menu.up .menu-list{top:auto;bottom:calc(100% + 4px)}
+
+/* ── the job panel ── */
+.detail-err{color:var(--warn);font-weight:600}
+.log{margin-top:8px}
+.log > summary{margin-top:0}
+.log pre{margin-top:6px;padding:10px 12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line-soft);
+  font-size:11.5px;line-height:1.55;color:var(--ink2);white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto}
+.notice.inline{margin:10px 0 0}
+.chart-wrap{position:relative}
+.chart-tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:7px;
+  padding:5px 8px;font-size:11.5px;color:var(--ink2);box-shadow:var(--shadow);white-space:nowrap;z-index:5}
+.chart-tip b{color:var(--ink)}
+.pan-side .code pre{white-space:pre-wrap;word-break:break-all}
+
+/* a value beside its bar: per-class AP, boxes per class */
+.barrow{display:grid;grid-template-columns:minmax(80px,1.2fr) 2fr auto;align-items:center;gap:10px;
+  padding:6px 2px;border-bottom:1px solid var(--line-soft);font-size:12.5px;color:var(--ink2)}
+.barrow.head{font-size:11.5px;font-weight:700;color:var(--ink3);border-bottom-color:var(--line)}
+.barrow .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.barrow .v{font-variant-numeric:tabular-nums;text-align:right;min-width:72px}
+.barrow .bt{height:8px;border-radius:4px;background:var(--line-soft);overflow:hidden}
+.barrow .bf{height:100%;background:var(--acc);border-radius:4px}
+.barrow.low .bf{background:var(--warn)}
+.barrow .sub{font-weight:400;color:var(--ink3)}
+.warns{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.warns div{font-size:12.5px;color:var(--warn);font-weight:600}
+.summary-card .kv{margin-top:6px}
+.next-step{margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* the webcam, in the wide pane */
+#cam,#cam-out{background:#000}
+
+/* ── dark: the same tokens, for a dark screen. Text tokens keep ≥ 4.5:1 on
+      every panel colour (ink3 on panel2: 5.8:1, warn on panel2: 5.9:1);
+      white on the accent stays ≥ 4.5:1 for the filled buttons. ── */
+@media (prefers-color-scheme:dark){
+  :root{
+    color-scheme:dark;
+    --paper:#1A1916; --line-d:#8A7F6C; --pen-blue:#2C7A9C; --pen-blue-d:#8DC6DF; --pen-red:#EE8A63;
+    --bg:var(--paper); --panel:#23211D; --panel2:#2A2824;
+    --line:#7A7164; --line-soft:#3A3732;
+    --ink:#EDE8DF; --ink2:#D2CBBF; --ink3:#ABA294;
+    --acc-soft:#1D3441; --ok:#6CC08F; --ok-soft:#1C2E23;
+    --shadow:0 1px 0 rgba(0,0,0,.4);
+    --stage:#141311;
+    --toast-bg:#E8E2D6; --toast-ink:#23211D;
+  }
+  body{background-image:radial-gradient(rgba(141,198,223,.06) 1px,transparent 1px)}
+  .db.go:hover{background:#23698A;border-color:#23698A}
+  .db.warn{background:#B4451C;border-color:#B4451C}
+  .stp.done .cir,.seq-step.done .sq-idx{background:#2E7D4F}
+  .badge.ok{border-color:#2D4A37}
+  .navlink:hover{border-bottom-color:#4A453D}
+  input[type=range]::-webkit-slider-thumb{background:var(--panel)}
+  kbd{background:var(--panel2)}
 }

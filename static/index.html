@@ -18,7 +18,7 @@
   </nav>
   <span class="grow"></span>
   <div id="gpu-live" class="gpu" hidden></div>
-  <span class="badge" id="status"></span>
+  <span class="badge" id="status" role="status" aria-live="polite"></span>
   <button class="lang-toggle" id="langToggle" type="button" data-no-i18n title="한국어 / English">EN</button>
 </header>
 <div class="notice" id="gpu-warn" hidden>
@@ -35,6 +35,10 @@
   <div class="stp" data-step="infer" data-go="infer"><span class="cir">4</span>추론</div>
   <div class="stpline"></div>
   <div class="stp" data-step="use" data-go="models"><span class="cir">5</span>모델 쓰기</div>
+</div>
+<div class="steps-done" id="steps-done" hidden>
+  <span>다섯 단계를 모두 해 봤어요</span>
+  <button class="db sm" id="steps-show" type="button">단계 보기</button>
 </div>
 
 <main class="mk-main">
@@ -62,8 +66,8 @@
         <label class="dropzone"><input id="ds-video" type="file" accept="video/*">
           <b data-drop>영상을 끌어다 놓거나 눌러요</b><span>일정 간격으로 프레임을 뽑아요</span></label>
         <div class="grid2">
-          <div><div class="pb-label">프레임 간격</div><input class="inp" id="ds-every" type="number" value="30" min="1"></div>
-          <div><div class="pb-label">최대 장수</div><input class="inp" id="ds-max" type="number" value="300" min="1"></div>
+          <div><label class="pb-label" for="ds-every">프레임 간격</label><input class="inp" id="ds-every" type="number" value="30" min="1"></div>
+          <div><label class="pb-label" for="ds-max">최대 장수</label><input class="inp" id="ds-max" type="number" value="300" min="1"></div>
         </div>
       </div>
       <div data-panel="zip" class="field" hidden>
@@ -71,17 +75,17 @@
           <b data-drop>zip을 끌어다 놓거나 눌러요</b><span>Roboflow 등 YOLO 형식, 또는 images/ + labels/</span></label>
       </div>
       <div data-panel="folder" class="field" hidden>
-        <div class="pb-label">이 서버의 폴더 경로</div><input class="inp" id="ds-path" placeholder="/data/line-a/images">
-        <div class="field"><div class="pb-label">클래스</div><input class="inp" id="ds-classes" placeholder="can, bottle">
+        <label class="pb-label" for="ds-path">이 서버의 폴더 경로</label><input class="inp" id="ds-path" placeholder="/data/line-a/images">
+        <div class="field"><label class="pb-label" for="ds-classes">클래스</label><input class="inp" id="ds-classes" placeholder="can, bottle">
           <div class="hint">쉼표로 나눠요. 비우면 data.yaml을 읽거나 알아서 정해요.</div></div>
       </div>
 
       <div class="grid2">
-        <div><div class="pb-label">이름</div><input class="inp" id="ds-name" placeholder="자동"></div>
-        <div><div class="pb-label">넣을 곳</div><select class="inp" id="ds-target"><option value="">새 데이터셋</option></select></div>
+        <div><label class="pb-label" for="ds-name">이름</label><input class="inp" id="ds-name" placeholder="자동"></div>
+        <div><label class="pb-label" for="ds-target">넣을 곳</label><select class="inp" id="ds-target"><option value="">새 데이터셋</option></select></div>
       </div>
       <button class="db go block" id="ds-upload">데이터 추가</button>
-      <div class="msg" id="ds-msg"></div>
+      <div class="msg" id="ds-msg" role="status" aria-live="polite"></div>
 
       <div class="sec2">
         <div class="st">내 데이터셋 <span class="grow"></span>
@@ -100,7 +104,7 @@
       </div>
 
       <div id="train-form">
-        <div class="field"><div class="pb-label" data-en="Dataset">데이터셋</div><select class="inp" id="job-dataset"></select>
+        <div class="field"><label class="pb-label" for="job-dataset" data-en="Dataset">데이터셋</label><select class="inp" id="job-dataset"></select>
           <div class="hint" id="job-task" hidden></div></div>
         <div class="field"><div class="pb-label">목표</div>
           <div class="row seg full" id="presets">
@@ -111,18 +115,18 @@
           <div class="hint" id="preset-hint"></div>
           <div class="hint" id="kept" hidden></div>
         </div>
-        <div class="field"><div class="pb-label">시작 모델</div>
+        <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
           <select class="inp" id="job-model"><option>dfine-s</option><option>dfine-m</option><option>dfine-l</option></select>
           <div class="hint">n 가장 가벼움 · s 기본 · m · l · x 가장 정확</div></div>
         <div class="grid2">
-          <div><div class="pb-label">에폭</div><input class="inp" id="job-epochs" type="number" value="50" min="1"></div>
-          <div><div class="pb-label">배치</div><input class="inp" id="job-batch" type="number" value="4" min="1"></div>
+          <div><label class="pb-label" for="job-epochs">에폭</label><input class="inp" id="job-epochs" type="number" value="50" min="1" max="10000" step="1" required></div>
+          <div><label class="pb-label" for="job-batch">배치</label><input class="inp" id="job-batch" type="number" value="4" min="1" max="1024" step="1" required></div>
         </div>
-        <div class="field"><div class="pb-label">백본 고정</div>
+        <div class="field"><label class="pb-label" for="job-freeze">백본 고정</label>
           <select class="inp" id="job-freeze" style="width:100%"><option value="backbone">예 — 빠르고 적은 데이터에 알맞아요</option><option value="">아니오 — 백본까지 내 데이터에 맞춰요</option></select></div>
-        <div class="field"><div class="pb-label">안 나아지면 멈추기</div>
+        <div class="field"><label class="pb-label" for="job-patience">안 나아지면 멈추기</label>
           <div class="row" style="align-items:center">
-            <input class="inp" id="job-patience" type="number" value="15" min="0" style="flex:none;width:80px">
+            <input class="inp" id="job-patience" type="number" value="15" min="0" step="1" style="flex:none;width:80px">
             <span class="hint" style="margin-top:0">에폭 동안 mAP가 그대로면 멈춰요</span>
           </div>
           <div class="hint">가장 좋았던 가중치가 남아요. 0이면 끝까지 해요.</div></div>
@@ -132,29 +136,29 @@
         <details id="adv">
           <summary>고급 설정</summary>
           <div class="grid2">
-            <div><div class="pb-label">입력 크기</div><input class="inp" id="job-imgsz" type="number" value="640" step="32"></div>
-            <div><div class="pb-label">검증 비율</div><input class="inp" id="job-val" type="number" value="0.2" step="0.05" min="0.05" max="0.5"></div>
-            <div><div class="pb-label">장치</div>
+            <div><label class="pb-label" for="job-imgsz">입력 크기</label><input class="inp" id="job-imgsz" type="number" value="640" step="32" min="32" max="2048" required></div>
+            <div><label class="pb-label" for="job-val">검증 비율</label><input class="inp" id="job-val" type="number" value="0.2" step="any" min="0.05" max="0.5"></div>
+            <div class="wide"><label class="pb-label" for="job-device">장치</label>
               <select class="inp" id="job-device"><option value="">자동</option><option value="cpu">CPU</option><option value="0">GPU 0</option></select></div>
           </div>
           <div class="pb-label" style="margin-top:12px">옵티마이저</div>
-          <div class="hint" style="margin-top:0">비워 두면 easydetect가 정해요.</div>
+          <div class="hint" style="margin-top:0">비워 두면 easydetect가 정해요. 바꾼 칸은 파란 테두리로 보여요.</div>
           <div class="grid2">
-            <div><div class="pb-label">학습률</div><input class="inp" id="job-lr" type="number" step="0.00001" min="0" placeholder="자동">
+            <div><label class="pb-label" for="job-lr">학습률</label><input class="inp" id="job-lr" type="number" step="any" min="0.0000001" max="0.01" placeholder="자동">
               <div class="hint" id="job-lr-hint"></div></div>
-            <div><div class="pb-label">백본 학습률 비율</div><input class="inp" id="job-lr-bb" type="number" step="0.05" min="0" max="1" placeholder="자동">
+            <div><label class="pb-label" for="job-lr-bb">백본 학습률 비율</label><input class="inp" id="job-lr-bb" type="number" step="any" min="0" max="1" placeholder="자동">
               <div class="hint">학습률에 곱해요. 자동은 모델 크기별 (n·s 0.5, m 0.1, l 0.05, x 0.01)</div></div>
-            <div><div class="pb-label">워밍업 에폭</div><input class="inp" id="job-warmup" type="number" step="0.5" min="0" placeholder="1"></div>
-            <div><div class="pb-label">weight decay</div><input class="inp" id="job-wd" type="number" step="0.00001" min="0" placeholder="0.0001"></div>
-            <div><div class="pb-label">seed</div><input class="inp" id="job-seed" type="number" step="1" min="0" placeholder="0"></div>
-            <div><div class="pb-label">AMP</div>
+            <div><label class="pb-label" for="job-warmup">워밍업 에폭</label><input class="inp" id="job-warmup" type="number" step="any" min="0" placeholder="자동 (1)"></div>
+            <div><label class="pb-label" for="job-wd">weight decay</label><input class="inp" id="job-wd" type="number" step="any" min="0" max="1" placeholder="자동 (0.0001)"></div>
+            <div><label class="pb-label" for="job-seed">seed</label><input class="inp" id="job-seed" type="number" step="1" min="0" placeholder="자동 (0)"></div>
+            <div class="wide"><div class="pb-label">AMP</div>
               <label class="check"><input type="checkbox" id="job-amp" checked> 혼합 정밀도 (GPU만, 빨라요)</label></div>
-            <div><div class="pb-label">INT8</div>
+            <div class="wide"><div class="pb-label">INT8</div>
               <label class="check"><input type="checkbox" id="job-int8"> INT8도 만들기 (CPU에서 약 2배 빠름, 정확도 확인 필요)</label></div>
           </div>
         </details>
+        <div class="msg" id="job-msg" role="status" aria-live="polite"></div>
         <button class="db go block" id="job-start">학습 시작</button>
-        <div class="msg" id="job-msg"></div>
       </div>
     </div>
 
@@ -162,32 +166,35 @@
     <div data-view="infer" data-title="추론" hidden>
       <div class="lead">모델을 데이터셋·폴더·영상·웹캠에 돌려 봐요.</div>
 
-      <div class="field"><div class="pb-label" data-en="Model">모델</div><select class="inp" id="run-model"></select></div>
+      <div class="field"><label class="pb-label" for="run-model" data-en="Model">모델</label><select class="inp" id="run-model"></select></div>
       <div class="field">
-        <div class="prg"><div class="lb"><span>확신 정도 (conf)</span></div></div>
+        <div class="prg"><div class="lb"><label for="run-conf">확신 정도 (conf)</label></div></div>
         <div class="range"><input id="run-conf" type="range" min="0.05" max="0.95" step="0.05" value="0.5">
           <output id="run-conf-out">0.50</output></div>
         <div class="hint">낮추면 더 많이 찾고, 높이면 확실한 것만 남아요.</div></div>
       <div class="field">
-        <div class="prg"><div class="lb"><span>겹친 상자 정리 (IoU)</span></div></div>
+        <div class="prg"><div class="lb"><label for="run-iou">겹친 상자 정리 (IoU)</label></div></div>
         <div class="range"><input id="run-iou" type="range" min="0.3" max="1" step="0.05" value="0.7">
           <output id="run-iou-out">0.70</output></div>
         <div class="hint">이만큼 넘게 겹친 상자는 점수 높은 것 하나만 남겨요. 1이면 꺼요.</div>
-        <label class="check" style="margin-top:8px"><input type="checkbox" id="run-contain"> 같은 물체의 조각 상자 합치기</label>
-        <div class="hint">가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요. 그런 장면에서만 켜요: 겹쳐 있는 진짜 물체(군중, 책장)도 지워서 평균으로는 손해예요.</div>
-        <label class="check" style="margin-top:8px"><input type="checkbox" id="run-segment"> 물체 윤곽 칠하기 (세그멘테이션)</label>
-        <label class="check" style="margin-top:8px"><input type="checkbox" id="run-pose"> 키포인트 찍기 (포즈)</label>
-        <div class="hint">상자마다 MobileSAM이 물체 모양을 칠해요. 내 데이터로 학습한 모델도 마스크 라벨 없이 돼요. 처음 한 번 44MB를 받고, CPU에서는 사진마다 0.2초쯤 더 걸려요.</div>
-        <div class="hint">윤곽·키포인트로 학습한 모델은 그 학습에서 맞춘 윤곽·키포인트 모델을 써요. 아니면 키포인트는 COCO 사람 17점이에요.</div></div>
-      <div class="field"><div class="pb-label">대상</div>
+        <label class="check" style="margin-top:10px"><input type="checkbox" id="run-contain"> 같은 물체의 조각 상자 합치기</label>
+        <details class="help hint"><summary>설명</summary>
+          가려진 물체가 전체와 조각으로 여러 번 잡힐 때, 같은 종류 상자 안에 80% 넘게 들어간 상자를 하나로 정리해요. 그런 장면에서만 켜요: 겹쳐 있는 진짜 물체(군중, 책장)도 지워서 평균으로는 손해예요.</details>
+        <label class="check" style="margin-top:10px"><input type="checkbox" id="run-segment"> 물체 윤곽 칠하기 (세그멘테이션)</label>
+        <details class="help hint"><summary>설명</summary>
+          상자마다 MobileSAM이 물체 모양을 칠해요. 내 데이터로 학습한 모델도 마스크 라벨 없이 돼요. 처음 한 번 44MB를 받고, CPU에서는 사진마다 0.2초쯤 더 걸려요.</details>
+        <label class="check" style="margin-top:10px"><input type="checkbox" id="run-pose"> 키포인트 찍기 (포즈)</label>
+        <details class="help hint"><summary>설명</summary>
+          윤곽·키포인트로 학습한 모델은 그 학습에서 맞춘 윤곽·키포인트 모델을 써요. 아니면 키포인트는 COCO 사람 17점이에요.</details></div>
+      <div class="field"><div class="pb-label" id="run-target-label">대상</div>
         <div class="row seg full" id="run-tabs">
           <button class="db on" data-run="dataset" aria-pressed="true">데이터셋</button>
           <button class="db" data-run="path">폴더</button>
           <button class="db" data-run="video">영상</button>
           <button class="db" data-run="webcam">웹캠</button>
         </div></div>
-      <div class="field" data-runpanel="dataset"><select class="inp" id="run-dataset"></select></div>
-      <div class="field" data-runpanel="path" hidden><input class="inp" id="run-path" placeholder="/data/새-촬영분"></div>
+      <div class="field" data-runpanel="dataset"><select class="inp" id="run-dataset" aria-labelledby="run-target-label"></select></div>
+      <div class="field" data-runpanel="path" hidden><input class="inp" id="run-path" placeholder="/data/새-촬영분" aria-labelledby="run-target-label"></div>
       <div class="field" data-runpanel="video" hidden>
         <label class="dropzone"><input id="run-video" type="file" accept="video/*">
           <b data-drop>영상을 끌어다 놓거나 눌러요</b><span>상자를 그린 mp4로 돌려받아요</span></label>
@@ -197,12 +204,10 @@
           <button class="db go" id="cam-start">카메라 시작</button>
           <button class="db" id="cam-stop" disabled>정지</button>
         </div>
-        <div class="msg" id="cam-msg"></div>
-        <video id="cam" playsinline muted hidden></video>
-        <img id="cam-out" hidden alt="">
+        <div class="hint">카메라 화면과 찾은 결과는 가운데 칸에 나와요.</div>
       </div>
+      <div class="msg" id="run-msg" role="status" aria-live="polite"></div>
       <button class="db go block" id="run-start">추론 실행</button>
-      <div class="msg" id="run-msg"></div>
     </div>
 
     <!-- ---------- models ---------- -->
@@ -216,10 +221,10 @@
         <label class="dropzone compact"><input id="model-file" type="file" accept=".pt,.xml,.bin,.onnx,.txt" multiple>
           <b data-drop>.pt · .onnx · IR(.xml + .bin)</b><span>IR은 두 파일을 함께 골라요</span></label>
         <div class="row" style="margin-top:8px">
-          <input class="inp" id="model-name" placeholder="이름 (비우면 파일 이름)">
+          <input class="inp" id="model-name" placeholder="이름 (비우면 파일 이름)" aria-label="이름 (비우면 파일 이름)">
           <button class="db" id="model-upload">올리기</button>
         </div>
-        <div class="msg" id="model-msg"></div>
+        <div class="msg" id="model-msg" role="status" aria-live="polite"></div>
       </div>
 
       <div class="sec2">
@@ -249,12 +254,38 @@
         <div class="card"><span class="cir">3</span><b>학습</b><span>COCO에서 시작해 몇 분</span></div>
         <div class="card"><span class="cir">4</span><b>추론 · 배포</b><span>웹캠·영상 · OpenVINO IR</span></div>
       </div>
+      <div class="next-step" id="next-step" hidden></div>
+    </div>
+
+    <!-- a dataset's statistics, from its card menu -->
+    <div id="ds-detail" hidden>
+      <div class="dim small" id="ds-sub"></div>
+      <div class="toolbar" id="ds-actions"></div>
+      <div class="sec2"><div class="st">클래스별 상자</div><div id="ds-classes-bars"></div></div>
+      <div class="warns" id="ds-warns"></div>
+    </div>
+
+    <!-- a registered model's code -->
+    <div id="model-detail" hidden>
+      <div class="dim small mono" id="md-path" style="word-break:break-all"></div>
+      <div class="chips" id="md-classes"></div>
+      <div class="sec2"><div class="st">코드에서 쓰기</div>
+        <div class="code"><button class="db copy">복사</button><pre id="md-code"></pre></div></div>
+    </div>
+
+    <!-- the webcam, large -->
+    <div id="cam-panel" hidden>
+      <div class="msg" id="cam-msg" role="status" aria-live="polite"></div>
+      <video id="cam" playsinline muted hidden></video>
+      <img id="cam-out" hidden alt="">
     </div>
 
     <div id="detail" hidden>
       <div class="dim small" id="detail-sub"></div>
       <div class="track" id="detail-bar" style="margin-top:10px" hidden><div class="fill"></div></div>
-      <div class="msg" id="detail-msg"></div>
+      <div class="msg" id="detail-msg" role="status" aria-live="polite"></div>
+      <details class="log" id="detail-log" hidden><summary>로그 끝부분</summary><pre></pre></details>
+      <div class="notice inline" id="detail-warn" hidden></div>
       <div class="toolbar">
         <button class="db" id="cancel">중지</button>
         <button class="db" id="resume">이어서 학습</button>
@@ -278,8 +309,9 @@
 
       <div class="sec2" id="chart-box">
         <div class="st" id="chart-title">학습 곡선 <span class="grow"></span>
-          <span class="legend"><span><i style="background:var(--line)"></i>loss</span><span><i style="background:var(--acc)"></i>mAP50-95</span></span></div>
-        <canvas id="chart"></canvas>
+          <span class="legend"><span><i style="background:var(--ink3)"></i>loss (왼쪽)</span><span><i style="background:var(--acc)"></i>mAP50-95 (오른쪽)</span></span></div>
+        <div class="chart-wrap"><canvas id="chart" role="img" aria-label="학습 곡선"></canvas>
+          <div class="chart-tip" id="chart-tip" hidden></div></div>
         <details id="epochs-box">
           <summary id="epochs-title">에폭별 기록</summary>
           <table class="mk-table" id="epochs-table" style="margin-top:6px"><thead><tr><th>#</th><th>loss</th><th>mAP50-95</th><th>초</th></tr></thead>
@@ -292,7 +324,7 @@
         <div class="row" style="align-items:center;flex-wrap:wrap">
           <label class="dropzone compact" style="flex:1;min-width:200px"><input id="try-file" type="file" accept="image/*">
             <b data-drop>이미지 한 장</b><span>끌어다 놓거나 눌러요</span></label>
-          <input class="inp" id="try-conf" type="number" value="0.5" step="0.05" min="0" max="1" style="flex:none;width:72px" title="확신 정도 (conf)">
+          <input class="inp" id="try-conf" type="number" value="0.5" step="0.05" min="0" max="1" style="flex:none;width:72px" title="확신 정도 (conf)" aria-label="확신 정도 (conf)">
           <button class="db go" id="try">추론</button>
         </div>
         <img id="preview" hidden alt="">
@@ -307,6 +339,7 @@
       <div class="sec2" id="report" hidden>
         <div class="st">평가 결과</div>
         <div id="report-summary"></div>
+        <label class="check hint" style="margin-top:12px"><input type="checkbox" id="report-missed"> 놓친 이미지만 보기</label>
         <div class="gallery" id="gallery"></div>
       </div>
 
@@ -326,8 +359,8 @@
         </div>
         <div id="hub" hidden>
           <div class="grid2">
-            <div><div class="pb-label">저장소</div><input class="inp" id="hub-repo" placeholder="user/repo"></div>
-            <div><div class="pb-label">저장소 안 폴더</div><input class="inp" id="hub-folder" placeholder="models/my-model"></div>
+            <div><label class="pb-label" for="hub-repo">저장소</label><input class="inp" id="hub-repo" placeholder="user/repo"></div>
+            <div><label class="pb-label" for="hub-folder">저장소 안 폴더</label><input class="inp" id="hub-folder" placeholder="models/my-model"></div>
           </div>
           <label class="hint" style="display:flex;gap:7px;align-items:center;cursor:pointer">
             <input type="checkbox" id="hub-pt"> best.pt도 넣기 — 받은 사람이 이어서 학습할 수 있어요 (용량이 늘어요)</label>
@@ -358,7 +391,7 @@
     </div>
   </section>
 </main>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="static/js/i18n.js"></script>
 <script>
@@ -388,15 +421,40 @@ function toast(text) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").classList.remove("on"), 2000);
 }
 
+// what a list was last drawn from: the 4-second refresh redraws only what changed,
+// so an open menu, a scrolled list or an open dropdown is left alone
+const drawn = {};
+const changed = (key, ...value) => {
+  const sig = JSON.stringify(value);
+  if (drawn[key] === sig) return false;
+  drawn[key] = sig; return true;
+};
+
 // ---------------------------------------------------------------- views
-function show(view) {
-  document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === view));
+// the address says the tab and the job: #train/5. Back and forward move between them.
+const VIEWS = ["data", "train", "infer", "models"];
+let view = "data";
+function readHash() {
+  const [v, job] = location.hash.slice(1).split("/");
+  return { view: VIEWS.includes(v) ? v : null, job: Number(job) || null };
+}
+function writeHash(push = true) {
+  const want = `#${view}${current ? `/${current}` : ""}`;
+  if (location.hash === want) return;
+  if (push) history.pushState(null, "", want); else history.replaceState(null, "", want);
+}
+function show(next, { push = true } = {}) {
+  view = next;
+  document.querySelectorAll("#nav button").forEach((b) => {
+    b.classList.toggle("on", b.dataset.view === next);
+    if (b.dataset.view === next) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
   document.querySelectorAll("#side .pb > [data-view]").forEach((p) => {
-    p.hidden = p.dataset.view !== view;
+    p.hidden = p.dataset.view !== next;
     if (!p.hidden) $("view-title").textContent = p.dataset.title;
   });
-  store.set("view", view);
-  if (location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
+  store.set("view", next);
+  writeHash(push);
 }
 document.querySelectorAll("#nav button").forEach((b) => b.onclick = () => show(b.dataset.view));
 document.addEventListener("click", (e) => {
@@ -405,8 +463,25 @@ document.addEventListener("click", (e) => {
   // one open menu at a time, and a click elsewhere closes it
   document.querySelectorAll("details.menu[open]").forEach((m) => { if (!m.contains(e.target)) m.open = false; });
 });
-show(["data", "train", "infer", "models"].includes(location.hash.slice(1)) ? location.hash.slice(1)
-     : store.get("view") || "data");
+addEventListener("popstate", () => {
+  const h = readHash();
+  if (h.view && h.view !== view) show(h.view, { push: false });
+  if (h.job && h.job !== current) select(h.job, { scroll: false, push: false });
+  else if (!h.job && current) closeDetail({ push: false });
+});
+const opened = readHash();
+show(opened.view || store.get("view") || "data", { push: false });
+
+// a menu near the bottom of its panel opens upwards rather than under the edge
+document.addEventListener("toggle", (e) => {
+  const menu = e.target;
+  if (!menu.matches?.("details.menu")) return;
+  menu.classList.remove("up");
+  if (!menu.open) return;
+  const list = menu.querySelector(".menu-list"), box = menu.closest(".pb") || document.body;
+  if (list.getBoundingClientRect().bottom > Math.min(box.getBoundingClientRect().bottom, innerHeight))
+    menu.classList.add("up");
+}, true);
 
 // file boxes: click to pick, or drop onto them; they say what was picked
 document.querySelectorAll(".dropzone input").forEach((input) => {
@@ -430,7 +505,15 @@ document.querySelectorAll(".dropzone input").forEach((input) => {
 });
 
 let smiSeen = false, gpu = null, running = null, runPicked = false, listedAt = 0, listedStatus = null;
-let jobFilter = "", allJobs = [];
+let jobFilter = "", allJobs = [], allDatasets = [], allModels = [], firstLoad = true, stepsShown = false;
+
+// which model a job used, in words: "best.pt" alone says nothing about which run
+function modelLabel(path) {
+  const run = String(path || "").match(/[\\/]job(\d+)[\\/](weights|openvino|onnx)[\\/]/);
+  const named = allModels.find((m) => m.path === path || String(m.id) === String(path));
+  if (named) return named.name;
+  return run ? T`#${run[1]} 학습 결과` : short(path);
+}
 
 const KIND = { train: "학습", autolabel: "자동 라벨", evaluate: "평가", predict: "추론" };
 const STATUS = { queued: "대기", running: "실행 중", exporting: "내보내는 중", done: "완료",
@@ -452,12 +535,17 @@ $("job-dataset").addEventListener("change", showTrainTask);
 async function refresh() {
   const [state, datasets, jobs, registry] = await Promise.all([
     api("/api/status"), api("/api/datasets"), api("/api/jobs"), api("/api/models")]);
-  allJobs = jobs;
-  $("status").textContent = [state.running_job ? T`#${state.running_job} 실행 중` : T("쉬는 중"),
-    state.queued ? T`대기 ${state.queued}` : "", state.gpu || smiSeen ? "" : T("CPU 전용")].filter(Boolean).join(" · ");
-  $("status").classList.toggle("ok", !state.running_job);
-  $("gpu-warn").hidden = !(smiSeen && !state.gpu);   // the driver sees a card PyTorch cannot use
+  allJobs = jobs; allDatasets = datasets; allModels = registry.models;
   running = state.running_job;
+  const live = jobs.find((j) => j.id === state.running_job);
+  const pct = live && live.progress ? ` ${Math.round(live.progress * 100)}%` : "";
+  $("status").textContent = [state.running_job ? T`#${state.running_job} 실행 중` + pct : T("쉬는 중"),
+    state.queued ? T`대기 ${state.queued}` : "", state.gpu || smiSeen ? "" : T("CPU 전용")].filter(Boolean).join(" · ");
+  $("status").title = $("status").textContent;      // whole, where a phone cuts it short
+  $("status").classList.toggle("ok", !state.running_job);
+  // a tab in the background still says how far the run is
+  document.title = pct ? `${pct.trim()} · easydetect lab` : "easydetect lab";
+  $("gpu-warn").hidden = !(smiSeen && !state.gpu);   // the driver sees a card PyTorch cannot use
   if (state.gpu && !gpu) {                 // a GPU wants batches a CPU could not hold
     gpu = state.gpu;
     if ($("job-batch").value === "4" && !touched.has("job-batch")) $("job-batch").value = "16";
@@ -466,43 +554,57 @@ async function refresh() {
   $("n-data").textContent = datasets.length;
   $("n-models").textContent = registry.models.length;
 
-  renderDatasets(datasets);
-  const options = datasets.map((d) =>
-    `<option value="${d.id}">${esc(d.name)} · ${T`이미지 ${d.images}`}</option>`).join("");
-  const trainable = datasets.filter((d) => d.labelled > 0);
-  const keepDs = $("job-dataset").value;
-  $("job-dataset").innerHTML = trainable.map((d) =>
-    `<option value="${d.id}">${esc(d.name)} · ${T`라벨 ${d.labelled}/${d.images}`}</option>`).join("");
-  if (keepDs && trainable.some((d) => String(d.id) === keepDs)) $("job-dataset").value = keepDs;
-  trainTasks = Object.fromEntries(datasets.map((d) => [String(d.id), d.task]));
-  showTrainTask();
-  $("train-empty").hidden = trainable.length > 0;
-  $("train-form").hidden = trainable.length === 0;
-  const keep = $("ds-target").value;
-  $("ds-target").innerHTML = `<option value="">새 데이터셋</option>` + options;
-  $("ds-target").value = keep;
-  const keepRun = $("run-dataset").value;
-  $("run-dataset").innerHTML = options;
-  if (keepRun) $("run-dataset").value = keepRun;
+  // each list is redrawn only when what it shows has changed: a redraw closes
+  // an open menu or dropdown, and this runs every few seconds
+  if (changed("datasets", datasets, i18n.lang)) {
+    renderDatasets(datasets);
+    const options = datasets.map((d) =>
+      `<option value="${d.id}">${esc(d.name)} · ${T`이미지 ${d.images}`}</option>`).join("");
+    const trainable = datasets.filter((d) => d.labelled > 0);
+    const keepDs = $("job-dataset").value;
+    $("job-dataset").innerHTML = trainable.map((d) =>
+      `<option value="${d.id}">${esc(d.name)} · ${T`라벨 ${d.labelled}/${d.images}`}</option>`).join("");
+    if (keepDs && trainable.some((d) => String(d.id) === keepDs)) $("job-dataset").value = keepDs;
+    trainTasks = Object.fromEntries(datasets.map((d) => [String(d.id), d.task]));
+    showTrainTask();
+    $("train-empty").hidden = trainable.length > 0;
+    $("train-form").hidden = trainable.length === 0;
+    const keep = $("ds-target").value;
+    $("ds-target").innerHTML = `<option value="">새 데이터셋</option>` + options;
+    $("ds-target").value = keep;
+    const keepRun = $("run-dataset").value;
+    $("run-dataset").innerHTML = options;
+    if (keepRun) $("run-dataset").value = keepRun;
+  }
 
   // a finished run is usable straight away — no need to register it first
-  const trained = jobs.filter((j) => j.kind === "train" && j.status === "done" && j.run_dir)
-    .map((j) => `<option value="${esc(j.run_dir)}/weights/best.pt">#${j.id} ${esc(j.dataset || "")}`
-      + `${j.best_map != null ? ` · mAP ${fmt(j.best_map)}` : ""}</option>`).join("");
-  const mine = trained ? `<optgroup label="내 학습 결과">${trained}</optgroup>` : "";
-  const named = registry.models.length ? `<optgroup label="등록된 모델">`
-    + registry.models.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("") + `</optgroup>` : "";
-  const coco = `<optgroup label="COCO 사전학습 · 80 클래스">`
-    + registry.builtin.map((n) => `<option value="${n}">${n}</option>`).join("") + `</optgroup>`;
-  // training starts from COCO; using a model starts from what you trained
-  for (const [id, html] of [["job-model", coco + named + mine], ["run-model", mine + named + coco]]) {
-    const was = $(id).value;
-    $(id).innerHTML = html;
-    if (was && (id !== "run-model" || runPicked)) $(id).value = was;
+  const runs = jobs.filter((j) => j.kind === "train" && j.status === "done" && j.run_dir);
+  if (changed("pickers", runs.map((j) => [j.id, j.dataset, j.best_map]), registry, i18n.lang)) {
+    const trained = runs.map((j) => `<option value="${esc(j.run_dir)}/weights/best.pt">#${j.id} ${esc(j.dataset || "")}`
+        + `${j.best_map != null ? ` · mAP ${fmt(j.best_map)}` : ""}</option>`).join("");
+    const mine = trained ? `<optgroup label="내 학습 결과">${trained}</optgroup>` : "";
+    const named = registry.models.length ? `<optgroup label="등록된 모델">`
+      + registry.models.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("") + `</optgroup>` : "";
+    const coco = `<optgroup label="COCO 사전학습 · 80 클래스">`
+      + registry.builtin.map((n) => `<option value="${n}">${n}</option>`).join("") + `</optgroup>`;
+    // training starts from COCO; using a model starts from what you trained
+    for (const [id, html] of [["job-model", coco + named + mine], ["run-model", mine + named + coco]]) {
+      const was = $(id).value;
+      $(id).innerHTML = html;
+      if (was && (id !== "run-model" || runPicked)) $(id).value = was;
+    }
   }
-  renderModels(registry.models);
+  if (changed("models", registry.models, i18n.lang)) renderModels(registry.models);
   renderJobs();
   renderSteps(datasets, jobs, registry.models);
+
+  // the first time round: open the job the address names, else the newest one,
+  // so the wide pane shows a result rather than the same four cards every visit
+  if (firstLoad) {
+    firstLoad = false;
+    const wanted = opened.job && jobs.some((j) => j.id === opened.job) ? opened.job : jobs[0]?.id;
+    if (wanted && !current) select(wanted, { scroll: false, push: false });
+  }
 }
 
 // how far along you are: done steps turn green, the next one is marked
@@ -515,18 +617,30 @@ function renderSteps(datasets, jobs, models) {
     el.classList.toggle("done", done[el.dataset.step]);
     el.classList.toggle("on", el.dataset.step === next);
   });
+  // every step done: the bar folds into one line, and can come back
+  $("steps").hidden = !next && !stepsShown;
+  $("steps-done").hidden = !!next || stepsShown;
+  // the overview card says what to do next, with the way there
+  const step = next && document.querySelector(`#steps .stp[data-step="${next}"]`);
+  $("next-step").hidden = !step;
+  if (step && changed("next-step", next, i18n.lang)) {
+    $("next-step").innerHTML = `<span><b>${T("다음 할 일")}</b> · ${esc(step.textContent.replace(/^\d+/, "").trim())}</span>
+      <button class="db sm go" type="button" data-go="${step.dataset.go}">${T("바로 가기")}</button>`;
+  }
 }
+$("steps-show").onclick = () => { stepsShown = true; $("steps").hidden = false; $("steps-done").hidden = true; };
 
 // ---------------------------------------------------------------- datasets
 function renderDatasets(datasets) {
   const picked = new Set(pickedIds());
+  const openMenu = document.querySelector("#datasets details.menu[open]")?.dataset.id;
   $("datasets").innerHTML = datasets.map((d) => {
     const pct = d.images ? Math.round(d.labelled / d.images * 100) : 0;
     return `
     <div class="card">
       <div class="top"><span class="nm">${esc(d.name)}</span><span class="dim small">#${d.id}</span>
         ${d.task === "segment" ? `<span class="chip">${T("윤곽")}</span>` : d.task === "pose" ? `<span class="chip">${T("키포인트")}</span>` : ""}<span class="grow"></span>
-        <details class="menu"><summary class="db sm" title="더 보기">⋯</summary>
+        <details class="menu" data-id="${d.id}"><summary class="db sm" title="더 보기" aria-label="더 보기">⋯</summary>
           <div class="menu-list">
             <button data-stats="${d.id}">통계 보기</button>
             <button data-autolabel="${d.id}">전체 자동 라벨</button>
@@ -544,9 +658,12 @@ function renderDatasets(datasets) {
         <a class="db sm" href="label/${d.id}">상자 그리기</a>
         <button class="db sm" data-train="${d.id}" ${d.labelled ? "" : "disabled title='상자를 그려야 학습할 수 있어요'"}>이 데이터로 학습</button>
       </div>
-      <div class="stats" id="stats-${d.id}" hidden></div>
     </div>`;
   }).join("") || `<div class="empty">아직 데이터셋이 없어요.<br>위에서 사진이나 zip을 올려 봐요.</div>`;
+  if (openMenu) {                                   // a redraw must not close what was open
+    const menu = document.querySelector(`#datasets details.menu[data-id="${openMenu}"]`);
+    if (menu) menu.open = true;
+  }
   const on = (attr, fn) => document.querySelectorAll(`[data-${attr}]`).forEach((el) =>
     el.onclick = (e) => { el.closest("details.menu")?.removeAttribute("open"); fn(Number(el.dataset[attr]), e); });
   on("autolabel", autolabelAll);
@@ -631,11 +748,34 @@ $("ds-upload").onclick = async () => {
   finally { $("ds-upload").disabled = false; }
 };
 
+// rows of "name — bar — value": per-class boxes, per-class AP
+const barRows = (rows, head) => `<div class="barrow head"><span>${head[0]}</span><span></span><span class="v">${head[1]}</span></div>`
+  + rows.map((r) => `<div class="barrow${r.low ? " low" : ""}"><span class="nm" title="${esc(r.name)}">${esc(r.name)}</span>
+      <span class="bt"><span class="bf" style="display:block;width:${Math.round(Math.max(0, Math.min(1, r.share)) * 100)}%"></span></span>
+      <span class="v">${r.value}${r.sub ? ` <span class="sub">${r.sub}</span>` : ""}</span></div>`).join("");
+
+// a dataset's statistics, in the wide pane
 async function showStats(datasetId) {
-  const panel = $(`stats-${datasetId}`);
-  if (!panel.hidden) { panel.hidden = true; return; }
-  const s = await api(`/api/datasets/${datasetId}/stats`);
-  const rows = s.per_class.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.boxes}</td></tr>`).join("");
+  const d = allDatasets.find((x) => x.id === datasetId);
+  let s;
+  try { s = await api(`/api/datasets/${datasetId}/stats`); }
+  catch (e) { say("ds-msg", e.message, "err"); return; }
+  leaveJob();
+  pane("dataset");
+  $("detail-title").textContent = d ? d.name : `#${datasetId}`;
+  $("detail-tag").textContent = d?.task === "segment" ? T("윤곽") : d?.task === "pose" ? T("키포인트") : "";
+  $("detail-tag").className = "state";
+  $("ds-sub").textContent = d ? `#${d.id} · ${T`이미지 ${d.images}`} · ${T`라벨 ${d.labelled}`} · ${T`클래스 ${d.classes.length}`}` : "";
+  $("ds-actions").innerHTML = `<a class="db" href="label/${datasetId}">${T("상자 그리기")}</a>
+    <button class="db" type="button" data-ds-train="${datasetId}" ${d?.labelled ? "" : "disabled"}>${T("이 데이터로 학습")}</button>
+    <button class="db" type="button" data-ds-auto="${datasetId}">${T("전체 자동 라벨")}</button>`;
+  $("ds-actions").querySelector("[data-ds-train]").onclick = () => { show("train"); $("job-dataset").value = String(datasetId); showTrainTask(); };
+  $("ds-actions").querySelector("[data-ds-auto]").onclick = () => autolabelAll(datasetId);
+  const most = Math.max(1, ...s.per_class.map((c) => c.boxes));
+  const rows = s.per_class.map((c) => ({ name: c.name, value: c.boxes, share: c.boxes / most, low: c.boxes === 0 }));
+  if (s.task === "segment") rows.push({ name: T("윤곽"), value: s.outlines, share: s.outlines / Math.max(1, s.boxes) });
+  if (s.task === "pose") s.per_keypoint.forEach((k) => rows.push({ name: `· ${k.name}`, value: k.placed, share: k.placed / Math.max(1, s.boxes) }));
+  $("ds-classes-bars").innerHTML = barRows(rows, [T("클래스"), T`상자 합계 ${s.boxes}`]);
   const warn = [];
   if (s.unlabelled.length) warn.push(T`라벨 없음 ${s.unlabelled.length}장`);
   if (s.empty_labels.length) warn.push(T`빈 라벨(배경) ${s.empty_labels.length}장`);
@@ -643,11 +783,8 @@ async function showStats(datasetId) {
   if (s.unknown_class_boxes) warn.push(T`클래스 범위 밖 ${s.unknown_class_boxes}개`);
   if (s.task === "segment" && s.boxes > s.outlines) warn.push(T`윤곽 없는 상자 ${s.boxes - s.outlines}개`);
   if (s.boxes_without_keypoints) warn.push(T`키포인트 없는 상자 ${s.boxes_without_keypoints}개`);
-  const extra = s.task === "segment" ? `<tr><td>${T("윤곽")}</td><td>${s.outlines}</td></tr>`
-    : s.task === "pose" ? s.per_keypoint.map((k) => `<tr><td class="dim">· ${esc(k.name)}</td><td>${k.placed}</td></tr>`).join("") : "";
-  panel.innerHTML = `<table class="mk-table">${rows}<tr><td><b>상자 합계</b></td><td><b>${s.boxes}</b></td></tr>${extra}</table>`
-    + (warn.length ? `<div class="warn small" style="margin-top:6px">${warn.join(" · ")}</div>` : "");
-  panel.hidden = false;
+  $("ds-warns").innerHTML = warn.map((w) => `<div>${esc(w)}</div>`).join("");
+  scrollToPane();
 }
 
 async function duplicate(datasetId) {
@@ -732,13 +869,49 @@ document.querySelectorAll("#presets button").forEach((b) => {
 });
 Object.values(PRESET_FIELDS).forEach((id) => {
   $(id).addEventListener("input", presetHint);
-  $(id).addEventListener("change", () => { touched.add(id); presetHint(); showKept(); });
+  // on input, not only on change: "change" fires as the field loses focus, and the
+  // note it adds above pushed the start button away from under a click in progress
+  const keep = () => { if (touched.has(id)) return; touched.add(id); presetHint(); showKept(); };
+  $(id).addEventListener("input", keep);
+  $(id).addEventListener("change", keep);
 });
 $("job-lr").addEventListener("input", presetHint);
 presetHint();
 
+// a field the run cannot start with: marked, opened if it sits under 고급 설정,
+// focused, and said in words beside the button — before anything is sent
+const NUMBER_FIELDS = ["job-epochs", "job-batch", "job-patience", "job-imgsz", "job-val", "job-lr",
+                       "job-lr-bb", "job-warmup", "job-wd", "job-seed"];
+// what the server names in a refusal, and the field it means
+const SERVER_FIELDS = [["에폭", "job-epochs"], ["배치", "job-batch"], ["입력 크기", "job-imgsz"],
+  ["lr_backbone_mult", "job-lr-bb"], ["lr", "job-lr"], ["weight_decay", "job-wd"],
+  ["warmup_epochs", "job-warmup"], ["seed", "job-seed"], ["patience", "job-patience"]];
+function flagField(id, message) {
+  const el = $(id);
+  if (el.closest("#adv")) $("adv").open = true;
+  el.classList.add("bad");
+  el.addEventListener("input", () => el.classList.remove("bad"), { once: true });
+  say("job-msg", message, "err");
+  el.focus();
+  $("job-msg").scrollIntoView({ block: "nearest" });
+}
+function fieldProblem(el) {
+  if (el.checkValidity()) return null;
+  const label = (document.querySelector(`label[for="${el.id}"]`)?.textContent || el.id).trim();
+  const v = el.validity;
+  if (v.valueMissing || v.badInput) return T`${label}을(를) 숫자로 적어 주세요`;
+  if (v.stepMismatch) return Number(el.step) === 1 ? T`${label}은(는) 정수여야 해요` : T`${label}은(는) ${el.step}의 배수여야 해요`;
+  if (el.max) return T`${label}은(는) ${el.min}에서 ${el.max} 사이여야 해요`;
+  return T`${label}은(는) ${el.min} 이상이어야 해요`;
+}
+
 $("job-start").onclick = async () => {
   say("job-msg", "");
+  document.querySelectorAll("#train-form .inp.bad").forEach((el) => el.classList.remove("bad"));
+  for (const id of NUMBER_FIELDS) {
+    const problem = fieldProblem($(id));
+    if (problem) return flagField(id, problem);
+  }
   const datasetId = Number($("job-dataset").value);
   if (!datasetId) return say("job-msg", "데이터셋을 골라 주세요", "err");
   const same = allJobs.find((j) => j.kind === "train" && j.dataset_id === datasetId
@@ -760,7 +933,11 @@ $("job-start").onclick = async () => {
         val_ratio: Number($("job-val").value), device: $("job-device").value })});
     say("job-msg", T`#${res.id}을(를) 대기열에 넣었어요`, "ok");
     await select(res.id);
-  } catch (e) { say("job-msg", e.message, "err"); }
+  } catch (e) {
+    const field = SERVER_FIELDS.find(([name]) => e.message.startsWith(name));
+    if (field) flagField(field[1], e.message);
+    else { say("job-msg", e.message, "err"); $("job-msg").scrollIntoView({ block: "nearest" }); }
+  }
   finally { $("job-start").disabled = false; }
 };
 
@@ -772,49 +949,78 @@ document.querySelectorAll("#job-filter button").forEach((b) => b.onclick = () =>
 });
 
 function renderJobs() {
+  if (!changed("jobs", allJobs, allModels.map((m) => [m.id, m.name]), jobFilter, current, i18n.lang)) return;
   const jobs = allJobs.filter((j) => !jobFilter || j.kind === jobFilter);
   $("jobs-sub").textContent = allJobs.length ? T`${allJobs.length}개` : "";
   if (!allJobs.length) {
     $("jobs").innerHTML = `<div class="empty">학습·자동 라벨·평가·추론이<br>여기 차례로 쌓여요.</div>`;
     return;
   }
+  const focused = document.activeElement?.closest?.("[data-job]")?.dataset.job;
   $("jobs").innerHTML = jobs.map((j) => {
     const live = ["running", "exporting"].includes(j.status);
     const meta = j.kind === "train"
-      ? `${short(j.model)} · ${T`${j.epochs}에폭`} · ${j.imgsz}px · ${T`배치 ${j.batch}`}`
-      : `${short(j.model)} · conf ${fmt(j.conf, 2)}`;
+      ? `${modelLabel(j.model)} · ${T`${j.epochs}에폭`} · ${j.imgsz}px · ${T`배치 ${j.batch}`}`
+      : `${modelLabel(j.model)} · conf ${fmt(j.conf, 2)}`;
     const extra = [j.best_map != null ? `mAP50-95 ${fmt(j.best_map)}` : "",
                    j.started && j.finished ? duration(j.finished - j.started) : ""].filter(Boolean).join(" · ");
     const line = live || j.status === "failed" ? (j.detail || "") : [meta, extra].filter(Boolean).join(" · ");
     return `
-    <div class="cls job ${j.id === current ? "on" : ""}" data-job="${j.id}">
-      <div class="top"><span class="nm">#${j.id} ${T(KIND[j.kind] || j.kind)} · ${esc(j.dataset || (j.source ? short(j.source) : ""))}</span>
-        <span class="state ${j.status}">${T(STATUS[j.status] || j.status)}</span></div>
-      <div class="sub ${j.status === "failed" ? "err" : ""}">${esc(line)}</div>
-      ${live ? `<div class="track"><div class="fill" style="width:${Math.round((j.progress || 0) * 100)}%"></div></div>` : ""}
-    </div>`;
+    <button type="button" class="cls job ${j.id === current ? "on" : ""}" data-job="${j.id}"
+        ${j.id === current ? 'aria-current="true"' : ""}>
+      <span class="top"><span class="nm">#${j.id} ${T(KIND[j.kind] || j.kind)} · ${esc(j.dataset || (j.source ? short(j.source) : ""))}</span>
+        <span class="state ${j.status}">${T(STATUS[j.status] || j.status)}</span></span>
+      <span class="sub ${j.status === "failed" ? "err" : ""}"><span>${esc(line)}</span></span>
+      ${live ? `<span class="track"><span class="fill" style="display:block;width:${Math.round((j.progress || 0) * 100)}%"></span></span>` : ""}
+    </button>`;
   }).join("") || `<div class="empty">이 종류의 작업은 아직 없어요.</div>`;
   document.querySelectorAll("[data-job]").forEach((el) => el.onclick = () => select(Number(el.dataset.job)));
+  if (focused) document.querySelector(`[data-job="${focused}"]`)?.focus();
 }
 
-async function select(id, { scroll = true } = {}) {
+// the wide pane shows one thing at a time: the overview, a job, a dataset's
+// statistics, a model's code, or the webcam
+function pane(mode) {
+  for (const [id, m] of [["guide", "guide"], ["detail", "job"], ["ds-detail", "dataset"],
+                         ["model-detail", "model"], ["cam-panel", "cam"]]) $(id).hidden = mode !== m;
+  $("detail-close").hidden = mode === "guide";
+  if (mode !== "cam" && camStream) stopCam();
+  if (mode !== "job") $("chart-tip").hidden = true;
+}
+// stacked on a narrow screen, the wide pane sits below the form: go to it
+const scrollToPane = () => {
+  $("detail-pane").scrollTop = 0;
+  if (matchMedia("(max-width:1100px)").matches) $("detail-pan").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+// no job open any more (another thing takes the pane)
+function leaveJob() {
+  if (stream) stream.close();
+  current = null; currentJob = null; drawnJob = null;
+  writeHash(false);
+  renderJobs();
+}
+
+let drawnJob = null;                       // the job as last drawn: an unchanged one is not drawn again
+async function select(id, { scroll = true, push = true } = {}) {
   const fresh = current !== id;
   current = id;
-  $("detail").hidden = false; $("guide").hidden = true; $("detail-close").hidden = false;
-  if (fresh) { $("preview").hidden = true; predShown = { id: null, at: 0 }; $("downloads").open = false; }
+  pane("job");
+  if (fresh) { $("preview").hidden = true; predShown = { id: null, at: 0 }; $("downloads").open = false; drawnJob = null; }
+  writeHash(push && fresh);
   await refresh();
-  const job = await api(`/api/jobs/${id}`);
+  let job;
+  try { job = await api(`/api/jobs/${id}`); }
+  catch { if (current === id) closeDetail({ push: false }); return; }   // deleted meanwhile
   render(job);
-  if (fresh) $("detail-pane").scrollTop = 0;
-  // stacked on a narrow screen, the job sits below the form: go to it
-  if (scroll && fresh && matchMedia("(max-width:1100px)").matches)
-    $("detail-pan").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (fresh && scroll) scrollToPane();
+  else if (fresh) $("detail-pane").scrollTop = 0;
   if (stream) stream.close();
   if (["queued", "running", "exporting"].includes(job.status)) {
     stream = new EventSource(`/api/jobs/${id}/stream`);
     stream.onmessage = async (e) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === "end") { stream.close(); await select(id, { scroll: false }); return; }
+      if (msg.type === "end") { stream.close(); await select(id, { scroll: false, push: false }); return; }
+      if (current !== id) return;
       render(await api(`/api/jobs/${id}`));
       // the list must not say "대기" for a job the view says is running:
       // at once when the status moves, every few seconds for progress
@@ -825,15 +1031,31 @@ async function select(id, { scroll = true } = {}) {
   }
 }
 
-function closeDetail() {
+function closeDetail({ push = true } = {}) {
   if (stream) stream.close();
-  current = null; currentJob = null; $("detail").hidden = true; $("guide").hidden = false;
-  $("detail-close").hidden = true; $("detail-title").textContent = "시작하기"; $("detail-tag").textContent = "";
+  current = null; currentJob = null; drawnJob = null;
+  pane("guide");
+  $("detail-title").textContent = T("시작하기"); $("detail-tag").textContent = "";
+  writeHash(push);
   renderJobs();
 }
-$("detail-close").onclick = closeDetail;
+$("detail-close").onclick = () => closeDetail();
+
+// what a stopped or failed job says, in one line, and the log apart.
+// Rows from before log_tail carried both in `detail` (" — " and " / ").
+function jobMessage(job) {
+  let line = job.detail || "", log = job.log_tail || "";
+  if (!log && ["failed", "cancelled"].includes(job.status) && / \/ |\[easydetect\]/.test(line)) {
+    log = line.replace(/ \/ /g, "\n");
+    line = job.status === "cancelled" ? "중지했어요" : "";
+  }
+  return { line, log };
+}
 
 function render(job) {
+  const sig = JSON.stringify([job, i18n.lang, running]);
+  if (sig === drawnJob) return;                     // nothing new since the last event
+  drawnJob = sig;
   currentJob = job;
   const rows = job.epochs_done;
   const train = job.kind === "train";
@@ -845,12 +1067,30 @@ function render(job) {
   $("detail-tag").className = `state ${job.status}`;
   const took = job.started && job.finished ? ` · ${T`${duration(job.finished - job.started)} 걸림`}` : "";
   const what = train ? ` · ${T`${job.epochs}에폭`} · ${job.imgsz}px · ${T`배치 ${job.batch}`}${job.freeze ? ` · ${T("백본 고정")}` : ""}` : "";
-  $("detail-sub").textContent = `${short(job.model)} · ${job.dataset || (job.source ? short(job.source) : "")}${what}${took}`;
+  $("detail-sub").textContent = `${modelLabel(job.model)} · ${job.dataset || (job.source ? short(job.source) : "")}${what}${took}`;
 
   const waiting = job.status === "queued"
     ? (running && running !== job.id ? T`기다리는 중이에요. #${running}이(가) 끝나면 시작해요` : T("곧 시작해요"))
     : "";
-  say("detail-msg", job.detail || waiting, job.status === "failed" ? "err" : "");
+  const { line, log } = jobMessage(job);
+  if (job.status === "failed") {
+    // one line that says it failed, then what the error was; the log under it
+    $("detail-msg").className = "msg err";
+    $("detail-msg").innerHTML = `<span class="detail-err">${esc(T("작업이 멈췄어요. 아래 오류를 확인해 주세요"))}</span><br><span>${esc(line)}</span>`;
+  } else if (job.kind === "evaluate" && job.status === "done") {
+    say("detail-msg", "");                          // the numbers are in the report below
+  } else {
+    let text = line || waiting;
+    // between batches the trainer says "검증 중" with no time left: work it out from the epochs
+    if (train && job.status === "running" && rows.length && !/남은 시간/.test(text)) {
+      const per = rows.reduce((s, r) => s + (r.seconds || 0), 0) / rows.length;
+      const left = per * Math.max(job.epochs - rows.length, 0);
+      if (left > 0) text = `${text} · 남은 시간 약 ${duration(left)}`;
+    }
+    say("detail-msg", text);
+  }
+  $("detail-log").hidden = !log;
+  $("detail-log").querySelector("pre").textContent = log;
   const live = ["running", "exporting"].includes(job.status);
   $("detail-bar").hidden = !live;
   $("detail-bar").firstElementChild.style.width = `${Math.round((job.progress || 0) * 100)}%`;
@@ -870,12 +1110,13 @@ function render(job) {
   $("downloads").hidden = !["dl-weights", "dl-ir", "dl-onnx", "dl-csv", "dl-log", "dl-pred", "dl-video"].some((id) => show[id]);
   $("try-row").hidden = !(train && has("weights"));
 
-  $("chart-box").hidden = !train;
+  // a run that ended before its first epoch has no curve to show
+  $("chart-box").hidden = !train || (!rows.length && !active);
   $("epochs-box").hidden = !rows.length;
   $("epochs-title").textContent = T`에폭별 기록 (${rows.length})`;
   $("epochs").innerHTML = rows.slice().reverse().map((r) =>
     `<tr><td>${r.epoch}</td><td>${fmt(r.loss)}</td><td>${fmt(r.map50_95)}</td><td>${fmt(r.seconds, 1)}</td></tr>`).join("");
-  if (train) chart(rows, job.epochs);
+  if (train && !$("chart-box").hidden) chart(rows, job.epochs);
   renderInfo(job);
   renderCode(job);
   loadReport(job);
@@ -883,8 +1124,28 @@ function render(job) {
 }
 
 // what the run was set up with and, once over, how it went (run.json + summary.json)
+// easydetect describes its augmentation in English; in Korean, say it in Korean
+const AUGMENT_KO = [
+  [/^photometric jitter$/, "색·밝기 흔들기"], [/^horizontal flip$/, "좌우 뒤집기"],
+  [/^zoom-out onto a canvas up to ([\d.]+)×$/, "최대 $1배 캔버스로 축소"],
+  [/^IoU-constrained random crop, (.+) of each side$/, "물체를 살리는 무작위 자르기 (변마다 $1)"],
+  [/^those off for the last (\d+) epoch\(s\)$/, "마지막 $1에폭은 끄기"],
+  [/^resize to (\d+)×(\d+)$/, "$1×$2로 크기 맞추기"],
+];
+const augmentText = (items) => items.map((a) => {
+  a = a.replace(/ \(.*\)/, "");
+  if (i18n.lang === "en") return a;
+  const hit = AUGMENT_KO.find(([pattern]) => pattern.test(a));
+  return hit ? a.replace(hit[0], hit[1]) : a;
+}).join(", ");
+
 function renderInfo(job) {
   const run = job.run || {};
+  // a run that could not fetch the COCO weights learns from far less: say so up top
+  const fromImagenet = job.kind === "train" && run.start?.kind === "imagenet";
+  $("detail-warn").hidden = !fromImagenet;
+  $("detail-warn").textContent = fromImagenet
+    ? T("COCO 가중치를 받지 못해 ImageNet 백본에서 시작했어요. 정확도가 많이 낮을 수 있어요. 인터넷 연결을 확인하고 다시 학습해 보세요.") : "";
   $("info").hidden = !(job.kind === "train" && run.variant);
   if ($("info").hidden) return;
   const m = (n) => n == null ? "—" : `${(n / 1e6).toFixed(1)}M`;
@@ -904,7 +1165,7 @@ function renderInfo(job) {
     ["장치", `${run.gpu || run.device}${run.amp ? " · AMP" : ""}`],
     ["옵티마이저", o.name ? `${o.name} · lr ${+o.lr.toPrecision(3)}${o.lr_from && o.lr_from !== "set" ? ` (${T`배치 ${run.batch} 기준 자동`})` : ""} · ${T`백본 ${+o.lr_backbone.toPrecision(3)}`} · wd ${o.weight_decay}` : "—"],
     ["스케줄", o.name ? `warmup ${T`${o.warmup_epochs}에폭`} → cosine · clip ${o.grad_clip}` : "—"],
-    ["증강", (run.augment || []).map((a) => a.replace(/ \(.*\)/, "")).join(", ") || "—"],
+    ["증강", augmentText(run.augment || []) || "—"],
     ["조기 종료", `patience ${run.patience}${run.stopped_early ? ` · ${T("일찍 멈춤")}` : ""}`],
     run.best_epoch ? ["최고 에폭", `${run.best_epoch}${run.epoch_seconds ? ` · ${T`에폭당 ${duration(run.epoch_seconds)}`}` : ""}`] : null,
     run.final ? ["마지막 loss", Object.entries(run.final).map(([k, x]) => `${k} ${x.toFixed(3)}`).join(" · ")] : null,
@@ -949,21 +1210,26 @@ async function loadReport(job) {
   const panel = $("report");
   if (!job.artifacts.includes("report")) { panel.hidden = true; return; }
   const r = await api(`/api/jobs/${job.id}/report`);
-  const rows = r.per_class.map((c) =>
-    `<tr><td>${esc(c.name)}</td><td>${fmt(c.ap50_95)}</td></tr>`).join("");
+  // the weakest class first: that is the one to label more of
+  const classes = r.per_class.slice().sort((a, b) => (a.ap50_95 ?? 0) - (b.ap50_95 ?? 0));
+  const rows = classes.map((c) => ({ name: c.name, value: fmt(c.ap50_95), share: c.ap50_95 || 0,
+    low: (c.ap50_95 ?? 0) < 0.3, sub: c.boxes != null ? T`검증 상자 ${c.boxes}` : "" }));
   $("report-summary").innerHTML =
     `<div class="kv"><div>mAP50<b>${fmt(r.map50)}</b></div><div>mAP50-95<b>${fmt(r.map50_95)}</b></div>
        <div>conf<b>${fmt(r.conf, 2)}</b></div></div>
-     <table class="mk-table" style="margin-top:10px"><tr><th data-en="Class">클래스</th><th>AP50-95</th></tr>${rows}</table>
+     <div style="margin-top:12px">${barRows(rows, [T("클래스 (낮은 것부터)"), "AP50-95"])}</div>
      <div class="hint">초록 상자가 정답, 색 상자가 예측이에요. 빨간 숫자는 놓친 이미지예요.</div>`;
-  $("gallery").innerHTML = r.images.map((im) => `
+  const missedOnly = $("report-missed").checked;
+  const images = r.images.filter((im) => !missedOnly || im.found < im.truth);
+  $("gallery").innerHTML = images.map((im) => `
     <div class="shot">
-      <img src="/api/jobs/${job.id}/eval/${im.file}" loading="lazy" onclick="window.open(this.src)" alt="">
+      <img src="/api/jobs/${job.id}/eval/${im.file}" loading="lazy" onclick="window.open(this.src)" alt="${esc(T`정답 ${im.truth}`)}">
       <div class="cap"><span>${T`정답 ${im.truth}`}</span>
         <span class="${im.found < im.truth ? "miss" : ""}">${T`찾음 ${im.found}`}</span></div>
-    </div>`).join("");
+    </div>`).join("") || `<div class="empty">${T("놓친 이미지가 없어요")}</div>`;
   panel.hidden = false;
 }
+$("report-missed").onchange = () => { if (currentJob) loadReport(currentJob); };
 
 function duration(seconds) {
   const s = Math.max(Math.round(seconds), 0);
@@ -971,39 +1237,97 @@ function duration(seconds) {
        : s >= 60 ? T`${Math.floor(s / 60)}분 ${s % 60}초` : T`${s}초`;
 }
 
+// a round number at or above v, for an axis top: 1, 2, 2.5, 5 × 10ⁿ
+function niceCeil(v) {
+  if (!(v > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].map((m) => m * p).find((x) => x >= v - 1e-12);
+}
+const tick = (v) => (v === 0 ? "0" : String(+v.toPrecision(3)));
+
+// loss on a left axis from 0, mAP on a right one; the best epoch marked; a
+// readout under the pointer. Loss from 0: a scale fitted to min…max made a
+// noisy but flat loss look like it swung wildly.
+let chartState = null;
 function chart(rows, total) {
   const css = getComputedStyle(document.documentElement);
   const color = (name) => css.getPropertyValue(name).trim();
-  const c = $("chart"), ctx = c.getContext("2d"), r = devicePixelRatio;
-  const w = c.width = c.clientWidth * r, h = c.height = 220 * r;
-  ctx.clearRect(0, 0, w, h);
-  const left = 10 * r, bottom = 18 * r, top = 8 * r, right = 8 * r;
-  ctx.strokeStyle = color("--line-soft"); ctx.lineWidth = r;
-  for (let i = 0; i <= 4; i++) {                        // quiet horizontal guides
-    const y = top + (h - top - bottom) * i / 4;
-    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(w - right, y); ctx.stroke();
+  const font = getComputedStyle(document.body).fontFamily;
+  const c = $("chart"), ctx = c.getContext("2d"), r = devicePixelRatio || 1;
+  const W = c.clientWidth, H = 220;
+  if (!W) return;
+  c.width = W * r; c.height = H * r;
+  ctx.setTransform(r, 0, 0, r, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const pad = { l: 46, r: 46, t: 10, b: 24 };
+  const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+  const n = Math.max(total || 0, rows.length, 1);
+  const x = (epoch) => pad.l + (n === 1 ? pw / 2 : (epoch - 1) / (n - 1) * pw);
+  const losses = rows.map((row) => row.loss).filter((v) => v != null);
+  const maps = rows.map((row) => row.map50_95).filter((v) => v != null);
+  const lossTop = niceCeil(Math.max(...losses, 0) * 1.05);
+  const mapTop = Math.min(1, niceCeil(Math.max(0.05, ...maps) * 1.1));
+  const yLoss = (v) => pad.t + ph - (v / lossTop) * ph;
+  const yMap = (v) => pad.t + ph - (v / mapTop) * ph;
+
+  ctx.font = `11px ${font}`; ctx.lineWidth = 1; ctx.textBaseline = "middle";
+  for (let i = 0; i <= 4; i++) {                         // guides, with both scales
+    const y = pad.t + ph * i / 4;
+    ctx.strokeStyle = color("--line-soft");
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillStyle = color("--ink3"); ctx.textAlign = "right";
+    ctx.fillText(tick(lossTop * (1 - i / 4)), pad.l - 6, y);
+    ctx.fillStyle = color("--acc-ink"); ctx.textAlign = "left";
+    ctx.fillText(tick(mapTop * (1 - i / 4)), W - pad.r + 6, y);
   }
-  ctx.fillStyle = color("--ink3"); ctx.font = `${11 * r}px Pretendard, sans-serif`;
-  ctx.fillText("1", left, h - 4 * r);
-  const last = String(Math.max(total, rows.length));
-  ctx.fillText(last, w - right - ctx.measureText(last).width, h - 4 * r);
-  if (!rows.length) return;
-  const line = (values, stroke, lo, hi) => {
-    const points = values.map((v, i) => v == null ? null : [
-      left + (w - left - right) * (rows.length === 1 ? 0 : i / Math.max(total - 1, rows.length - 1)),
-      h - bottom - (h - top - bottom) * ((v - lo) / (hi - lo || 1))]).filter(Boolean);
+  ctx.fillStyle = color("--ink3"); ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(pw / 60))));
+  for (let e = 1; e <= n; e += every) ctx.fillText(String(e), x(e), H - 6);
+  if ((n - 1) % every) ctx.fillText(String(n), x(n), H - 6);
+  if (!rows.length) {
+    ctx.fillText(T("첫 에폭이 끝나면 곡선이 나와요"), pad.l + pw / 2, pad.t + ph / 2);
+    chartState = null;
+    return;
+  }
+  const line = (key, y, stroke, width) => {
+    const points = rows.filter((row) => row[key] != null).map((row) => [x(row.epoch), y(row[key])]);
     if (!points.length) return;
-    ctx.strokeStyle = stroke; ctx.lineWidth = 2 * r; ctx.lineJoin = "round"; ctx.beginPath();
-    points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.lineJoin = "round"; ctx.beginPath();
+    points.forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py));
     ctx.stroke();
-    const [x, y] = points[points.length - 1];
-    ctx.fillStyle = stroke; ctx.beginPath(); ctx.arc(x, y, 3.5 * r, 0, 7); ctx.fill();
+    const [lx, ly] = points[points.length - 1];
+    ctx.fillStyle = stroke; ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, 7); ctx.fill();
   };
-  const losses = rows.map((row) => row.loss);
-  line(losses, color("--line"), Math.min(...losses) * 0.98, Math.max(...losses) * 1.02);
-  const maps = rows.map((row) => row.map50_95);
-  if (maps.some((v) => v != null)) line(maps, color("--acc"), 0, Math.max(0.05, ...maps.filter(Boolean)));
+  line("loss", yLoss, color("--ink3"), 1.5);
+  line("map50_95", yMap, color("--acc"), 2.5);
+  // the best epoch: what the run keeps as best.pt
+  const best = rows.reduce((b, row) => (row.map50_95 != null && (!b || row.map50_95 > b.map50_95) ? row : b), null);
+  if (best && best.map50_95 > 0) {
+    const bx = x(best.epoch);
+    ctx.strokeStyle = color("--ok"); ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(bx, pad.t); ctx.lineTo(bx, pad.t + ph); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = color("--ok"); ctx.beginPath(); ctx.arc(bx, yMap(best.map50_95), 4.5, 0, 7); ctx.fill();
+    ctx.textAlign = bx > W - pad.r - 60 ? "right" : "left";
+    ctx.fillText(T`최고 ${best.epoch}`, bx + (ctx.textAlign === "left" ? 6 : -6), pad.t + 10);
+  }
+  chartState = { rows, x, n };
 }
+$("chart").addEventListener("pointermove", (e) => {
+  if (!chartState) return;
+  const box = $("chart").getBoundingClientRect(), px = e.clientX - box.left;
+  const row = chartState.rows.reduce((b, row) =>
+    Math.abs(chartState.x(row.epoch) - px) < Math.abs(chartState.x(b.epoch) - px) ? row : b);
+  const tip = $("chart-tip");
+  tip.innerHTML = `<b>${T`에폭 ${row.epoch}`}</b> · loss ${fmt(row.loss)} · mAP50-95 ${fmt(row.map50_95)}`;
+  tip.hidden = false;
+  const left = Math.min(Math.max(chartState.x(row.epoch) - tip.offsetWidth / 2, 0), box.width - tip.offsetWidth);
+  tip.style.left = `${left}px`; tip.style.top = "0px";
+});
+$("chart").addEventListener("pointerleave", () => { $("chart-tip").hidden = true; });
+// the chart is drawn in pixels: a resize or a light/dark switch draws it again
+const redrawChart = () => { if (currentJob && currentJob.kind === "train" && !$("chart-box").hidden) chart(currentJob.epochs_done, currentJob.epochs); };
+addEventListener("resize", redrawChart);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redrawChart);
 
 // ---------------------------------------------------------------- code you can copy
 const hl = (code) => esc(code)
@@ -1214,6 +1538,7 @@ document.querySelectorAll("#run-tabs button").forEach((b) => {
     press("#run-tabs button", (x) => x.dataset.run === runTab);
     document.querySelectorAll("[data-runpanel]").forEach((p) => p.hidden = p.dataset.runpanel !== runTab);
     $("run-start").hidden = runTab === "webcam";
+    say("run-msg", "");                             // what the last tab said is not about this one
   };
 });
 $("run-model").onchange = () => { runPicked = true; };
@@ -1261,6 +1586,11 @@ $("run-start").onclick = async () => {
 // webcam preview: frames go to the server, annotated frames come back
 let camStream = null, camTimer = null;
 $("cam-start").onclick = async () => {
+  // the picture goes in the wide pane, not the narrow form
+  leaveJob();
+  pane("cam");
+  $("detail-title").textContent = T("웹캠"); $("detail-tag").textContent = ""; $("detail-tag").className = "state";
+  scrollToPane();
   if (!window.isSecureContext || !navigator.mediaDevices) {
     // browsers only hand a camera to https:// or localhost pages; the server
     // runs an HTTPS twin for exactly this
@@ -1308,13 +1638,14 @@ $("cam-start").onclick = async () => {
   }, 400);
 };
 
-$("cam-stop").onclick = () => {
+function stopCam() {
   clearInterval(camTimer); camTimer = null;
   if (camStream) camStream.getTracks().forEach((t) => t.stop());
   camStream = null;
   $("cam").hidden = true; $("cam-out").hidden = true;
   $("cam-start").disabled = false; $("cam-stop").disabled = true; say("cam-msg", "");
-};
+}
+$("cam-stop").onclick = () => { stopCam(); closeDetail(); };
 
 // ---------------------------------------------------------------- models
 function renderModels(models) {
@@ -1326,19 +1657,29 @@ function renderModels(models) {
         <button class="db sm danger" data-model="${m.id}">삭제</button></div>
       ${m.classes.length ? `<div class="chips">${m.classes.map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div>` : ""}
       <div class="small dim mono" style="margin-top:8px;word-break:break-all">${esc(m.path)}</div>
-      <div class="code" data-model-snippet="${m.id}" hidden><button class="db copy">복사</button><pre></pre></div>
     </div>`).join("")
     : `<div class="empty">등록한 모델이 아직 없어요.<br>작업을 열고 "모델로 등록"을 눌러요.</div>`;
   document.querySelectorAll("[data-model]").forEach((el) => el.onclick = async () => {
     if (!confirm(T("이 모델을 목록에서 뺄까요? 파일은 그대로 남아요."))) return;
     await api(`/api/models/${el.dataset.model}`, { method: "DELETE" }); await refresh();
   });
-  document.querySelectorAll("[data-model-code]").forEach((el) => el.onclick = () => {
-    const m = models.find((x) => String(x.id) === el.dataset.modelCode);
-    const box = document.querySelector(`[data-model-snippet="${m.id}"]`), pre = box.querySelector("pre");
-    pre.dataset.raw = pythonSnippet(m.path); pre.innerHTML = hl(pre.dataset.raw);
-    box.hidden = !box.hidden;
-  });
+  document.querySelectorAll("[data-model-code]").forEach((el) => el.onclick = () =>
+    showModel(models.find((x) => String(x.id) === el.dataset.modelCode)));
+}
+
+// a registered model's code, in the wide pane where it fits
+function showModel(m) {
+  if (!m) return;
+  leaveJob();
+  pane("model");
+  $("detail-title").textContent = m.name;
+  $("detail-tag").textContent = m.kind === "openvino" ? "OpenVINO IR" : m.kind;
+  $("detail-tag").className = "state";
+  $("md-path").textContent = m.path;
+  $("md-classes").innerHTML = m.classes.map((c) => `<span class="chip">${esc(c)}</span>`).join("");
+  $("md-code").dataset.raw = pythonSnippet(m.path);
+  $("md-code").innerHTML = hl($("md-code").dataset.raw);
+  scrollToPane();
 }
 
 $("model-upload").onclick = async () => {
@@ -1377,7 +1718,8 @@ async function gpuLive() {
 // script-built text is written in one language: write it again in the other
 addEventListener("langchange", () => {
   presetHint(); updateMergeButton(); renderGeneral(); refresh();
-  if (currentJob) render(currentJob); else closeDetail();
+  if (currentJob) render(currentJob);
+  else if (!$("guide").hidden) $("detail-title").textContent = T("시작하기");
 });
 gpuLive().then(refresh);   // refresh reads what gpuLive saw
 setInterval(gpuLive, 2000);

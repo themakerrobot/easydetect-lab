@@ -555,7 +555,7 @@ def test_evaluation_draws_from_its_one_scoring_pass(scored):
     assert scored.calls["workers"] == min(_loader_workers(), EVAL_BATCH)
     report = json.loads((scored.run / "eval" / "report.json").read_text())
     assert list(report) == ["map50", "map50_95", "conf", "per_class", "images"]
-    assert report["per_class"] == [{"name": "can", "ap50_95": 0.25}]
+    assert report["per_class"] == [{"name": "can", "ap50_95": 0.25, "boxes": 3}]
     assert report["images"] == [{"file": f"{i:04d}_{n}.jpg", "truth": 1, "found": 1}
                                 for i, n in enumerate("abc")]
     assert all((scored.run / "eval" / card["file"]).exists() for card in report["images"])

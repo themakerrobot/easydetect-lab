@@ -241,7 +241,7 @@ def test_an_export_and_a_merge_keep_the_keypoints(studio):
 
     client.post("/api/datasets/2/task", json={"task": "pose", "keypoints": [{"name": "x"}]})
     refused = client.post("/api/datasets/merge", json={"ids": [1, 2]})
-    assert refused.status_code == 400 and "keypoints" in refused.json()["error"]
+    assert refused.status_code == 400 and "키포인트" in refused.json()["error"]
 
 
 def test_training_reports_the_keypoint_and_outline_stages(studio, monkeypatch):

@@ -125,13 +125,21 @@ class Cancelled(Exception):
     """Raised inside a job to stop it cleanly."""
 
 
-def _tail(path: Path, lines: int = 8) -> str:
-    """The end of a log, for a failure message that says something."""
+def _tail(path: Path, lines: int = 12) -> str:
+    """The end of a log, one line a line, for the failure's details."""
     try:
         text = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
     except OSError:
         return ""
-    return " / ".join(text[-lines:])[:600]
+    return "\n".join(text[-lines:])[-2000:]
+
+
+def _stopped_note(db, job: dict) -> str:
+    """What a stopped job got through, in a line: not the log it was writing."""
+    if job["kind"] == "train" and job.get("epochs"):
+        row = db.one("SELECT COUNT(*) AS n FROM epochs WHERE job_id = ?", (job["id"],))
+        return f"에폭 {(row or {}).get('n') or 0}/{job['epochs']}에서 중지했어요"
+    return "중지했어요"
 
 
 def _box_filters(job) -> dict:
@@ -234,15 +242,19 @@ class Worker(threading.Thread):
                 else:
                     self._train(job)
             except Cancelled:
-                self.db.update_job(job["id"], status="cancelled", finished=time.time())
+                self.db.update_job(job["id"], status="cancelled", finished=time.time(),
+                                   detail=_stopped_note(self.db, job))
                 self.salvage(job["id"])
             except Exception as exc:
-                previous = self.db.one("SELECT detail FROM jobs WHERE id = ?", (job["id"],))
-                context = (previous or {}).get("detail") or ""
+                # the error in `detail`, one line; what led up to it in `log_tail`
+                # (the trainer's log when it wrote one, else the last progress line)
+                previous = self.db.one("SELECT detail, log_tail FROM jobs WHERE id = ?",
+                                       (job["id"],)) or {}
                 self.db.update_job(
                     job["id"],
                     status="failed",
-                    detail=f"{type(exc).__name__}: {exc}" + (f" — {context}" if context else ""),
+                    detail=f"{type(exc).__name__}: {exc}",
+                    log_tail=previous.get("log_tail") or previous.get("detail") or None,
                     finished=time.time(),
                 )
                 self.salvage(job["id"])
@@ -354,7 +366,7 @@ class Worker(threading.Thread):
                     seg=task == "segment",
                 )
         except Exception:
-            self.db.update_job(job_id, detail=_tail(log))  # what it said before it died
+            self.db.update_job(job_id, log_tail=_tail(log))  # what it said before it died
             # move, not replace: the temp directory is often a different
             # filesystem, and a rename across one would mask the real failure
             shutil.move(str(log), self.runs_dir / f"job{job_id}-failed.log")
@@ -460,12 +472,15 @@ class Worker(threading.Thread):
         out = Path(parent["run_dir"]) / "eval"
         out.mkdir(parents=True, exist_ok=True)
         cards = []
+        truth_per_class: dict[int, int] = {}   # validation boxes a class, beside its AP
         for i, image_path in enumerate(val.files):
             if job_id in self.cancelled:
                 raise Cancelled()
             frame = cv2.imread(str(image_path))
             height, width = frame.shape[:2]
             truth = val._load_labels(image_path)             # cls cx cy w h, normalised
+            for c in (truth[:, 0] if len(truth) else ()):
+                truth_per_class[int(c)] = truth_per_class.get(int(c), 0) + 1
             corners = np.zeros((len(truth), 6), np.float32)
             if len(truth):
                 cx, cy, w, h = (truth[:, 1] * width, truth[:, 2] * height,
@@ -505,7 +520,8 @@ class Worker(threading.Thread):
             "map50_95": metrics["map"],
             "conf": conf,
             "per_class": [
-                {"name": names.get(k, str(k)), "ap50_95": v}
+                {"name": names.get(k, str(k)), "ap50_95": v,
+                 "boxes": truth_per_class.get(int(k), 0) if str(k).isdigit() else None}
                 for k, v in sorted(metrics.get("per_class", {}).items())
             ],
             "images": cards,

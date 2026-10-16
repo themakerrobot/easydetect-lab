@@ -59,7 +59,7 @@
     "물체 윤곽 칠하기 (세그멘테이션)": "Outline objects (segmentation)",
     "상자마다 MobileSAM이 물체 모양을 칠해요. 내 데이터로 학습한 모델도 마스크 라벨 없이 돼요. 처음 한 번 44MB를 받고, CPU에서는 사진마다 0.2초쯤 더 걸려요.":
       "MobileSAM fills in each box's object. Works for models trained on your own boxes too, no mask labels. Downloads 44 MB once; on a CPU each picture takes about 0.2 s more.",
-    "클래스 편집": "Edit class", "이름 바꾸기": "Rename", "로 합치기": "Merge into it",
+    "클래스 편집": "Edit class", "이름 바꾸기": "Rename", "로 합치기": "Merge into the one picked",
     "클래스 삭제": "Delete class", "새 이름": "New name",
     "'{0}' 클래스를 지울까요? 상자 {1}개가 함께 지워지고, 뒤 클래스 번호가 하나씩 당겨져요.":
       "Delete the class '{0}'?\nIts {1} boxes go with it, and the classes after it move up one number.",
@@ -218,7 +218,7 @@
     "로 닫기 ·": "closes ·", "취소 ·": "cancels ·",
     "AI 윤곽 · 점을 끌어 고치기 · 선을 더블클릭하면 점 추가 · 점 우클릭은 지우기":
       "AI outline · drag points to fix · double-click a line to add a point · right-click a point to remove it",
-    "상자를 고르고 클릭으로 키포인트를 차례로 찍어요 ·": "pick a box and click its keypoints in order ·",
+    "상자를 고르고 클릭으로 키포인트를 차례로 찍어요 ·": "Pick a box and click its keypoints in order ·",
     "+클릭은 가려진 점 ·": "+click: a hidden point ·", "다음 점 · 점을 끌어 옮기기 · 점 우클릭: 가려짐 → 지우기 ·":
       "next point · drag a point to move it · right-click a point: hidden → removed ·",
     "선택 해제": "deselect",
@@ -243,10 +243,87 @@
     // export, and what the server refuses
     "INT8도 만들기 (CPU에서 약 2배 빠름, 정확도 확인 필요)": "Also make INT8 (about 2× faster on a CPU; check its accuracy)",
     "사진 목록이 바뀌었어요. 페이지를 새로 고쳐 주세요": "The picture list has changed. Reload the page",
+    "zip 파일이 없어요": "No zip uploaded", "zip 파일이 아니에요": "That file is not a zip",
+    "올린 파일이 없어요": "No files uploaded", "이미지 파일이 하나도 없어요": "None of those files are images",
+    "올린 영상이 없어요": "No video uploaded", "영상을 읽지 못했어요": "Could not read that video",
+    "영상에 프레임이 없어요": "That video had no frames", "이미지를 읽지 못했어요": "Could not read that image",
+    "키포인트마다 이름을 적어 주세요 (하나 이상)": "Name every keypoint, and give at least one",
+    "같은 이름의 키포인트가 두 개 있어요": "Two keypoints have the same name",
+    "합칠 데이터셋을 두 개 이상 골라 주세요": "Pick at least two datasets to merge",
+    "클래스 이름을 하나 이상 적어 주세요": "Give at least one class name",
+    "지울 클래스 번호를 주세요": "Give the class index to remove", "그런 클래스가 없어요": "No such class",
+    "있는 다른 클래스로 합쳐 주세요": "Merge into another existing class",
+    "데이터셋에는 클래스가 하나는 있어야 해요": "A dataset keeps at least one class",
+    "이 작업에는 가중치가 없어요": "That job has no weights", "가중치 파일이 없어요": "No weights on disk",
+    ".pt, .onnx, 또는 IR의 .xml과 .bin을 올려 주세요": "Expected a .pt, a .onnx, or an IR's .xml and .bin",
+    "OpenVINO IR은 파일 두 개예요. .xml과 .bin을 함께 골라 주세요": "An OpenVINO IR is two files — pick the .xml and its .bin together",
+    "그런 모델이 없어요": "No such model", "데이터셋, 폴더 경로, 영상 중 하나를 주세요": "Give a dataset, a folder path or a video",
+    "이 데이터셋에는 아직 라벨이 없어요": "That dataset has no labels yet",
+    "patience는 0(끄기) 이상이어야 해요": "patience must be 0 (off) or more",
+    "그런 작업이 없어요": "No such job", "그런 학습 작업이 없어요": "No such training job",
+    "작업이 아직 돌고 있어요": "That job is still going", "이어서 학습할 last.pt가 없어요": "No last.pt to resume from",
+    "아직 평가하지 않았어요": "Not evaluated yet", "추론 결과가 없어요": "No prediction results",
+    "그런 이미지가 없어요": "No such image", "아직 받을 파일이 없어요": "Nothing to download yet",
+    "가중치가 없어요": "No weights", "내보낸 IR이 없어요": "No exported IR", "내보낸 ONNX가 없어요": "No exported ONNX",
+    "아직 결과가 없어요": "No results yet", "결과 영상이 없어요": "No annotated video", "로그가 없어요": "No log",
+    "모르는 파일 종류예요": "Unknown file kind", "공유할 모델은 학습 작업에만 있어요": "Only a training run has a model to share",
+    "내보낸 IR이 없어요. 내보내기가 실패했거나 아직 학습 중이에요": "No exported IR — the export failed or the run is still going",
+    "학습한 모델이 없어요": "No trained model here", "결과 이미지를 만들지 못했어요": "Could not encode the result",
+    "올린 이미지가 없어요": "No image uploaded", "그런 데이터셋이 없어요": "No such dataset",
+    "이미지를 찾지 못했어요": "No images found",
+    "데이터셋마다 키포인트가 달라요. 먼저 같은 키포인트로 맞춰 주세요": "These datasets have different keypoints; give them the same keypoints first",
+    "에폭: 정수로 적어 주세요": "Epochs: enter a whole number", "배치: 정수로 적어 주세요": "Batch: enter a whole number",
+    "입력 크기: 정수로 적어 주세요": "Input size: enter a whole number", "더 할 에폭: 정수로 적어 주세요": "Extra epochs: enter a whole number",
+    "중지했어요": "Stopped",
+
+    // added with the design review: the overview, the panes, the form's checks
+    "다섯 단계를 모두 해 봤어요": "You've been through all five steps", "단계 보기": "Show the steps",
+    "다음 할 일": "Next", "바로 가기": "Go there", "#{0} 학습 결과": "run #{0}",
+    "클래스별 상자": "Boxes per class", "상자 합계 {0}": "{0} boxes in total", "로그 끝부분": "End of the log",
+    "놓친 이미지만 보기": "Only missed images", "놓친 이미지가 없어요": "No missed images", "설명": "More",
+    "카메라 화면과 찾은 결과는 가운데 칸에 나와요.": "The camera and what it finds show in the middle pane.",
+    "비워 두면 easydetect가 정해요. 바꾼 칸은 파란 테두리로 보여요.": "Left empty, easydetect decides. Fields you filled in are outlined in blue.",
+    "자동 (1)": "auto (1)", "자동 (0.0001)": "auto (0.0001)", "자동 (0)": "auto (0)",
+    "loss (왼쪽)": "loss (left)", "mAP50-95 (오른쪽)": "mAP50-95 (right)",
+    "{0}을(를) 숫자로 적어 주세요": "Enter a number for {0}", "{0}은(는) 정수여야 해요": "{0} must be a whole number",
+    "{0}은(는) {1}의 배수여야 해요": "{0} must be a multiple of {1}",
+    "{0}은(는) {1}에서 {2} 사이여야 해요": "{0} must be between {1} and {2}",
+    "{0}은(는) {1} 이상이어야 해요": "{0} must be at least {1}",
+    "작업이 멈췄어요. 아래 오류를 확인해 주세요": "The job stopped with an error:",
+    "COCO 가중치를 받지 못해 ImageNet 백본에서 시작했어요. 정확도가 많이 낮을 수 있어요. 인터넷 연결을 확인하고 다시 학습해 보세요.":
+      "The COCO weights could not be downloaded, so this run started from an ImageNet backbone only. Expect much lower accuracy; check the internet connection and train again.",
+    "검증 상자 {0}": "{0} val boxes", "클래스 (낮은 것부터)": "Class (weakest first)",
+    "첫 에폭이 끝나면 곡선이 나와요": "The curve appears after the first epoch", "최고 {0}": "best {0}", "에폭 {0}": "Epoch {0}",
+    "이 이미지의 물체": "Objects in this image", "축소 (-)": "Zoom out (-)", "확대 (+)": "Zoom in (+)",
+    "맞춤": "Fit", "화면에 맞추기 (0)": "Fit to the screen (0)", "단축키 {0}": "Shortcut {0}",
+    "상자 없는 다음 이미지 ·": "next image without boxes ·", "확대·축소·맞춤 ·": "zoom in / out / fit ·",
+    "이름표 숨기기 ·": "hide name tags ·",
+    "아직 없어요. 그림 위를 끌어서 그려요.": "None yet. Drag on the picture to draw one.",
+    "상자 {0}개를 찾았어요. 확인하고 고쳐 주세요": "Found {0} boxes. Check and fix them",
+    "이름표를 보여요": "Showing name tags", "이름표를 숨겨요 (L)": "Name tags hidden (L)",
+    "상자 없는 이미지가 더 없어요": "No more images without boxes",
   };
 
   // what the server writes while a job runs: "에폭 3/50 · 배치 12/40 · 남은 시간 약 4분"
   const FRAGMENTS = [
+    // whole refusals with a value in them, before the word-by-word ones below
+    [/^에폭 (\d+)\/(\d+)에서 중지했어요$/, "Stopped at epoch $1/$2"],
+    [/^에폭은 1에서 (\d+) 사이여야 해요$/, "Epochs must be between 1 and $1"],
+    [/^배치는 1에서 (\d+) 사이여야 해요$/, "Batch must be between 1 and $1"],
+    [/^더 할 에폭은 1에서 (\d+) 사이여야 해요$/, "Extra epochs must be between 1 and $1"],
+    [/^입력 크기는 32의 배수로, (\d+)에서 (\d+) 사이여야 해요$/, "Input size must be a multiple of 32, from $1 to $2"],
+    [/^(\S+)은\(는\) ([\d.e+-]+)에서 ([\d.e+-]+) 사이여야 해요$/, "$1 must be between $2 and $3"],
+    [/^(\S+)은\(는\) 숫자여야 해요$/, "$1 must be a number"],
+    [/^(\S+)은\(는\) 0보다 크고 1 이하여야 해요$/, "$1 must be above 0 and at most 1"],
+    [/^(.+)은\(는\) 폴더가 아니에요$/, "$1 is not a folder"],
+    [/^(.+)이\(가\) 없어요$/, "$1 does not exist"],
+    [/^라벨 종류는 (.+) 중 하나예요$/, "The label kind is one of $1"],
+    [/^#(\d+)이\(가\) 이 데이터셋을 쓰고 있어요\. 끝나길 기다리거나 멈춰 주세요$/, "Job #$1 uses this dataset; wait for it or stop it"],
+    [/^#(\d+)이\(가\) 아직 이 데이터셋을 쓰고 있어요$/, "Job #$1 is still using it"],
+    [/^라벨이 이미 클래스 (\d+)을\(를\) 써요\. 이름을 (\d+)개 이상 두거나 그 상자부터 고쳐 주세요$/,
+     "Labels already use class $1; keep at least $2 names or relabel those boxes first"],
+    [/^이름이 (.+)인 파일이 너무 많아요$/, "Too many files named $1"],
+    [/^zip 안에 위험한 경로가 있어요: (.+)$/, "Unsafe path in the archive: $1"],
     [/(\d+)시간/g, "$1 h"], [/(\d+)분/g, "$1 min"], [/(\d+)초/g, "$1 s"],
     [/남은 시간 계산 중/g, "estimating time left"], [/남은 시간 약 ([^·]+?)\s*$/, "~$1 left"],
     [/키포인트 학습/g, "keypoint training"], [/윤곽\(마스크\) 학습/g, "outline (mask) training"],
@@ -297,6 +374,10 @@
 
   const ORIGINAL = new WeakMap();   // text node → its Korean
   function swap(root) {
+    // never inside code: an inline <script> the parser has just added is seen
+    // here too, and rewriting its source before it runs broke the page in English
+    const host = root.nodeType === 1 ? root : root.parentElement;
+    if (host?.closest("pre, script, style, [data-no-i18n]")) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode: (n) => n.nodeType === 1 && (n.closest("pre, script, style, [data-no-i18n]"))
         ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });

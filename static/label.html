@@ -8,12 +8,12 @@
 <link rel="stylesheet" href="../static/css/themaker-ui.css">
 <link rel="stylesheet" href="../static/css/app.css">
 
-<header>
-  <a class="hbtn" href="../#data" title="데이터 목록으로"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
-  <h1><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="currentColor"/><rect x="7" y="10" width="18" height="14" rx="2.5" fill="none" stroke="white" stroke-width="2.4"/><rect x="7" y="6" width="10" height="5" rx="1.5" fill="white"/><circle cx="16" cy="17" r="2.2" fill="white"/></svg>easydetect</h1>
-  <span class="navlink on" id="title">상자 그리기</span>
+<header class="label-head">
+  <a class="hbtn" href="../#data" title="데이터 목록으로" aria-label="데이터 목록으로"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
+  <h1><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="currentColor"/><rect x="7" y="10" width="18" height="14" rx="2.5" fill="none" stroke="white" stroke-width="2.4"/><rect x="7" y="6" width="10" height="5" rx="1.5" fill="white"/><circle cx="16" cy="17" r="2.2" fill="white"/></svg><span class="brand">easydetect</span></h1>
+  <span class="crumb" id="title">상자 그리기</span>
   <span class="grow"></span>
-  <span class="badge" id="status"></span>
+  <span class="badge" id="status" aria-live="polite"></span>
   <button class="lang-toggle" id="langToggle" type="button" data-no-i18n title="한국어 / English">EN</button>
 </header>
 
@@ -28,7 +28,7 @@
       </div>
       <div class="hint" id="task-hint"></div>
       <div class="sec2" id="kpt-panel" hidden>
-        <div class="st">키포인트 <span class="grow"></span><button class="db sm" id="kpt-edit">편집</button></div>
+        <div class="st">키포인트 <span class="kpt-count" id="kpt-count"></span><span class="grow"></span><button class="db sm" id="kpt-edit">편집</button></div>
         <div id="kpts"></div>
         <div id="kpt-editor" class="kpt-editor" hidden>
           <div class="pb-label">점 이름 (한 줄에 하나, 순서대로)</div>
@@ -47,14 +47,17 @@
       <div class="sec2"><div class="st">클래스</div>
       <div id="classes"></div>
       <div class="row" style="margin-top:8px">
-        <input class="inp" id="new-class" placeholder="클래스 추가">
+        <input class="inp" id="new-class" placeholder="클래스 추가" aria-label="클래스 추가">
         <button class="db" id="add-class" title="추가">추가</button>
       </div></div>
+      <div class="sec2"><div class="st">이 이미지의 물체 <span class="kpt-count" id="objs-count"></span></div>
+        <div class="objs" id="objs"></div>
+      </div>
       <div class="sec2">
         <div class="st">이미지</div>
-        <select class="inp" id="folder" title="폴더별로 보기" style="width:100%;margin-bottom:8px"></select>
+        <select class="inp" id="folder" title="폴더별로 보기" aria-label="폴더별로 보기" style="width:100%;margin-bottom:8px"></select>
         <label class="hint check" style="margin-top:0"><input type="checkbox" id="only-unlabelled"> 상자 없는 것만 보기</label>
-        <div class="files" id="files"></div>
+        <div class="files" id="files" role="list"></div>
       </div>
     </div>
   </section>
@@ -73,7 +76,13 @@
       <span class="sep"></span>
       <button class="db" id="undo" title="Ctrl+Z">되돌리기</button>
       <button class="db" id="clear">모두 지우기</button>
-      <button class="db" id="reset-zoom" hidden>100%</button>
+      <span class="sep"></span>
+      <span class="zoom">
+        <button class="db sm" id="zoom-out" title="축소 (-)" aria-label="축소 (-)">−</button>
+        <output id="zoom-level" aria-live="polite">100%</output>
+        <button class="db sm" id="zoom-in" title="확대 (+)" aria-label="확대 (+)">+</button>
+        <button class="db sm" id="reset-zoom" title="화면에 맞추기 (0)">맞춤</button>
+      </span>
       <span class="grow"></span>
       <button class="db danger" id="drop" title="이 이미지와 상자를 데이터셋에서 지워요">이미지 삭제</button>
     </div>
@@ -81,7 +90,8 @@
     <div class="keys">
       끌어서 그려요 · 상자 안을 끌면 옮겨요 · 모서리를 끌면 크기가 바뀌어요 ·
       <kbd>1</kbd>–<kbd>9</kbd> 클래스 · <kbd>Del</kbd> 지우기 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 되돌리기 ·
-      <kbd>←</kbd> <kbd>→</kbd> 넘기기 · <kbd>C</kbd> 이전 상자 복사 · 휠 확대 ·
+      <kbd>←</kbd> <kbd>→</kbd> 넘기기 · <kbd>N</kbd> 상자 없는 다음 이미지 · <kbd>C</kbd> 이전 상자 복사 · 휠 확대 ·
+      <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> 확대·축소·맞춤 · <kbd>L</kbd> 이름표 숨기기 ·
       <kbd>Space</kbd>+끌기로 화면 이동 · 저장은 저절로 돼요
       <div data-for="segment"><kbd>P</kbd> 윤곽 그리기: 클릭으로 점 · 첫 점이나 <kbd>Enter</kbd>로 닫기 · <kbd>Esc</kbd> 취소 ·
         <kbd>S</kbd> AI 윤곽 · 점을 끌어 고치기 · 선을 더블클릭하면 점 추가 · 점 우클릭은 지우기</div>
@@ -90,6 +100,7 @@
     </div>
   </section>
 </main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="../static/js/i18n.js"></script>
 <script>
@@ -115,6 +126,21 @@ let tool = "box";  // "poly": clicks add outline points (outline datasets)
 let poly = null;   // the outline being drawn: [[x, y], ...] 0-1
 let hover = null;  // the pointer, in image pixels, for previews
 let kp = 0;        // the keypoint the next click places
+let showTags = true;   // L hides the class names drawn on the boxes
+const pointers = new Map();   // touches on the canvas: two of them pinch-zoom
+
+// what happened, said where it is seen: the counter in the header is the
+// counter, and a message there was overwritten by the next redraw
+let toastTimer = null;
+function notify(text, error = false, ms = 2600) {
+  const t = $("toast");
+  t.textContent = text;
+  t.style.background = error ? "#B4451C" : "";   // the kit's red pen: white on it reads in light and dark
+  t.style.color = error ? "#fff" : "";
+  t.classList.add("on");
+  clearTimeout(toastTimer);
+  if (ms) toastTimer = setTimeout(() => t.classList.remove("on"), ms);
+}
 
 const task = () => dataset?.task || "detect";
 const kptNames = () => dataset?.keypoints?.names || [];
@@ -132,7 +158,8 @@ function renderFolders() {
   const names = Object.keys(counts).sort();
   $("folder").hidden = names.length < 2;          // one folder: nothing to choose
   $("folder").innerHTML = `<option value="">${T`모든 폴더 (${dataset.files.length})`}</option>`
-    + names.map((d) => `<option value="${d}">${d || T("(최상위)")} (${counts[d]})</option>`).join("");
+    // folder names come from the disk: escaped, like every other name put into markup
+    + names.map((d) => `<option value="${esc(d)}">${esc(d) || T("(최상위)")} (${counts[d]})</option>`).join("");
   $("folder").value = folder;
 }
 
@@ -192,17 +219,44 @@ function renderTask() {
 function renderKeypoints() {
   const b = boxes[selected];
   $("kpts").innerHTML = "";
+  let placedCount = 0;
   kptNames().forEach((name, j) => {
     const v = b?.kpts?.[j]?.[2] || 0;
+    if (v) placedCount += 1;
+    const colour = KCOLORS[j % KCOLORS.length];
     const row = document.createElement("div");
     row.className = "cls kpt" + (j === kp ? " on" : "");
     row.setAttribute("role", "button");
-    row.innerHTML = `<div class="top"><span class="swatch round" style="background:${KCOLORS[j % KCOLORS.length]}"></span>
-      <span class="nm">${esc(name)}</span><span class="ct">${v === 2 ? "●" : v === 1 ? "◌" : ""}</span></div>`;
+    row.tabIndex = 0;
+    row.innerHTML = `<div class="top"><span class="swatch round" style="background:${colour}"></span>
+      <span class="nm">${esc(name)}</span><span class="ct" style="color:${colour}">${v === 2 ? "●" : v === 1 ? "◌" : ""}</span></div>`;
     row.title = v === 2 ? T("찍었어요") : v === 1 ? T("가려진 점") : T("아직 안 찍었어요");
+    row.setAttribute("aria-label", `${name}: ${row.title}`);
     row.onclick = () => { kp = j; renderKeypoints(); draw(); };
+    row.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); row.click(); } };
     $("kpts").append(row);
   });
+  // how many of this box's points are placed
+  $("kpt-count").textContent = b && kptNames().length ? `${placedCount}/${kptNames().length}` : "";
+  renderObjects();
+}
+
+// the objects on this picture, to pick one that is small or under another
+function renderObjects() {
+  const hadFocus = $("objs").contains(document.activeElement);
+  $("objs").innerHTML = "";
+  $("objs-count").textContent = boxes.length ? String(boxes.length) : "";
+  boxes.forEach((b, i) => {
+    const row = document.createElement("button");
+    row.type = "button"; row.className = "obj";
+    row.setAttribute("aria-current", i === selected);
+    row.innerHTML = `<span class="swatch${hasOutline(b) ? " round" : ""}" style="background:${COLORS[b.cls % COLORS.length]}"></span>
+      <span>${esc(dataset.classes[b.cls] ?? String(b.cls))}</span><span class="n">#${i + 1}</span>`;
+    row.onclick = () => { selected = i; cls = b.cls; renderClasses(); renderKeypoints(); draw(); };
+    $("objs").append(row);
+  });
+  if (!boxes.length) $("objs").innerHTML = `<div class="hint" style="margin-top:0">${T("아직 없어요. 그림 위를 끌어서 그려요.")}</div>`;
+  if (hadFocus) $("objs").querySelector('[aria-current="true"]')?.focus();
 }
 
 async function chooseTask(next) {
@@ -216,7 +270,7 @@ async function chooseTask(next) {
     }
     await post(`/api/datasets/${DATASET}/task`, { task: next });
     await reloadDataset();
-  } catch (e) { $("status").textContent = e.message; }
+  } catch (e) { notify(e.message, true); }
 }
 
 async function reloadDataset() {
@@ -280,7 +334,7 @@ async function saveKeypoints() {
     }
     await post(`/api/datasets/${DATASET}/task`, body);
     await reloadDataset();
-  } catch (e) { $("status").textContent = e.message; }
+  } catch (e) { notify(e.message, true); }
 }
 
 // ------------------------------------------------------------------ classes
@@ -290,16 +344,25 @@ const esc = (text) => String(text).replace(/[&<>"']/g,
 let editing = -1;                                // the class whose edit row is open
 function renderClasses() {
   const counts = boxes.reduce((acc, b) => (acc[b.cls] = (acc[b.cls] || 0) + 1, acc), {});
+  const focused = [...$("classes").children].indexOf(document.activeElement);   // keep the keyboard's place
   $("classes").innerHTML = "";
+  queueMicrotask(() => { if (focused >= 0) $("classes").children[focused]?.focus(); });
   dataset.classes.forEach((name, i) => {
     const b = document.createElement("div");
     b.className = "cls" + (i === cls ? " on" : "");
     b.setAttribute("role", "button");
-    b.innerHTML = `<div class="top"><span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
-                   <span class="nm">${esc(name)}</span><span class="ct num">${counts[i] || ""}</span>
-                   <span class="key">${i < 9 ? i + 1 : ""}</span>
-                   <button class="cls-more" title="${T("클래스 편집")}" aria-expanded="${i === editing}">⋯</button></div>`;
+    b.setAttribute("aria-pressed", i === cls);
+    b.tabIndex = 0;
+    // the hotkey on the left as a key, the count on the right with its word:
+    // "2 [3]" side by side read as two counts
+    b.innerHTML = `<div class="top"><kbd class="key" title="${T`단축키 ${i + 1}`}">${i < 9 ? i + 1 : ""}</kbd>
+                   <span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
+                   <span class="nm">${esc(name)}</span><span class="ct count num">${counts[i] ? T`상자 ${counts[i]}` : ""}</span>
+                   <button class="cls-more" title="${T("클래스 편집")}" aria-label="${T("클래스 편집")}" aria-expanded="${i === editing}">⋯</button></div>`;
     b.onclick = () => setClass(i);
+    b.onkeydown = (e) => {
+      if (e.target === b && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setClass(i); }
+    };
     b.querySelector(".cls-more").onclick = (e) => {
       e.stopPropagation(); editing = editing === i ? -1 : i; renderClasses();
     };
@@ -329,7 +392,7 @@ async function renameClass(i) {
   try {
     await post(`/api/datasets/${DATASET}/classes`, { names });
     dataset.classes = names; editing = -1; renderClasses();
-  } catch (e) { $("status").textContent = e.message; }
+  } catch (e) { notify(e.message, true); }
 }
 
 // Delete a class, or merge it into another (into = its index). Every label
@@ -350,7 +413,7 @@ async function removeClass(i, into) {
     editing = -1; cls = Math.min(cls, dataset.classes.length - 1);
     boxes = []; lastBoxes = [];                  // both would carry the old class numbers
     await load(index);
-  } catch (e) { $("status").textContent = e.message; }
+  } catch (e) { notify(e.message, true); }
 }
 
 async function addClass() {
@@ -368,21 +431,37 @@ function setClass(i) {
 }
 
 function renderFiles() {
+  const hadFocus = $("files").contains(document.activeElement);
   $("files").innerHTML = "";
   let shown = 0, position = 0;
   dataset.files.forEach((f, i) => {
     if (!listed(f) && i !== index) return;
     shown += 1;
     if (i === index) position = shown;
-    const row = document.createElement("div");
+    const row = document.createElement("button");
+    row.type = "button";
+    row.setAttribute("role", "listitem");
     row.className = "file" + (f.boxes > 0 ? " done" : f.labelled ? " empty" : "");
     row.title = f.boxes > 0 ? T`상자 ${f.boxes}개` : f.labelled ? T("빈 라벨 (배경 이미지)") : T("아직 상자가 없어요");
     row.setAttribute("aria-current", i === index);
     const label = folder ? f.name.slice(folder.length + 1) : f.name;   // the folder is already chosen
-    row.innerHTML = `<span class="dot"></span><span>${label}</span>`;
+    // a file name is the disk's, not ours: escaped, never markup
+    row.innerHTML = `<span class="dot"></span><span>${esc(label)}</span><span class="n">${f.boxes > 0 ? f.boxes : ""}</span>`;
     row.onclick = () => load(i);
     $("files").append(row);
   });
+  // keep the current picture in view inside its list — the list's own scroll
+  // box only, never the page (on a phone that pulled the canvas off screen)
+  const here_ = $("files").querySelector('[aria-current="true"]');
+  let box = $("files");
+  while (box && box !== document.body && !(box.scrollHeight > box.clientHeight + 1
+         && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+  if (here_ && box && box !== document.body) {
+    const r = here_.getBoundingClientRect(), b = box.getBoundingClientRect();
+    if (r.top < b.top) box.scrollTop -= b.top - r.top;
+    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
+  }
+  if (hadFocus) here_?.focus({ preventScroll: true });
   const here = dataset.files.filter(inFolder);
   const done = here.filter((f) => f.labelled).length;
   $("status").textContent = `${position} / ${shown}${folder ? ` · ${folder}` : ""} · ${T`다 그린 것 ${done}/${here.length}`}`;
@@ -405,29 +484,45 @@ function fit(keepZoom) {
   // the drawing buffer keeps the image's own resolution, so labels stay exact
   // whatever the zoom; only the CSS size changes
   const stage = canvas.parentElement.getBoundingClientRect();
-  const room = Math.min((stage.width - 32) / canvas.width, (stage.height - 32) / canvas.height);
+  // on a phone the stage takes the picture's height (at most 70% of the screen)
+  // instead of a fixed one with the picture floating in the middle of it
+  const narrow = matchMedia("(max-width:700px)").matches;
+  const room = narrow
+    ? Math.min((stage.width - 32) / canvas.width, (innerHeight * 0.7) / canvas.height)
+    : Math.min((stage.width - 32) / canvas.width, (stage.height - 32) / canvas.height);
   baseWidth = Math.max(canvas.width * room, 100);
+  canvas.parentElement.style.height = narrow ? `${Math.round(canvas.height * room) + 34}px` : "";
   if (!keepZoom) zoom = 1;
   applyZoom();
 }
 
 function applyZoom() {
   canvas.style.width = `${baseWidth * zoom}px`;
-  $("reset-zoom").hidden = zoom === 1;
-  $("reset-zoom").textContent = `${Math.round(zoom * 100)}%`;
+  $("zoom-level").textContent = `${Math.round(zoom * 100)}%`;
+  $("reset-zoom").disabled = zoom === 1;
+  $("zoom-out").disabled = zoom <= 1;
+  $("zoom-in").disabled = zoom >= 12;
+}
+
+// zoom about a point of the stage (its centre for the buttons and keys)
+function zoomBy(factor, clientX, clientY) {
+  if (!baseWidth) return;
+  const before = canvas.getBoundingClientRect(), stage = canvas.parentElement;
+  const s = stage.getBoundingClientRect();
+  clientX ??= s.left + s.width / 2; clientY ??= s.top + s.height / 2;
+  const ax = (clientX - before.left) / before.width, ay = (clientY - before.top) / before.height;
+  zoom = Math.min(Math.max(zoom * factor, 1), 12);
+  applyZoom();
+  const after = canvas.getBoundingClientRect();
+  stage.scrollLeft += after.width * ax - before.width * ax;
+  stage.scrollTop += after.height * ay - before.height * ay;
+  draw();
 }
 
 canvas.parentElement.addEventListener("wheel", (e) => {
   if (!baseWidth) return;
   e.preventDefault();
-  const before = canvas.getBoundingClientRect();
-  const ax = (e.clientX - before.left) / before.width, ay = (e.clientY - before.top) / before.height;
-  zoom = Math.min(Math.max(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 1), 12);
-  applyZoom();
-  const after = canvas.getBoundingClientRect();
-  const stage = canvas.parentElement;
-  stage.scrollLeft += after.width * ax - before.width * ax;
-  stage.scrollTop += after.height * ay - before.height * ay;
+  zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY);
 }, { passive: false });
 
 window.addEventListener("resize", () => { fit(true); draw(); });
@@ -447,9 +542,12 @@ function boxFromPoints(b) {
   Object.assign(b, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 });
 }
 
+// the grab handles of a box: its four corners, then the middle of each edge
+// (top, right, bottom, left) — an edge moves one side only
 function corners(b) {
   const [x, y, w, h] = pixels(b);
-  return [[x, y], [x + w, y], [x, y + h], [x + w, y + h]];
+  return [[x, y], [x + w, y], [x, y + h], [x + w, y + h],
+          [x + w / 2, y], [x + w, y + h / 2], [x + w / 2, y + h], [x, y + h / 2]];
 }
 
 function at(event) {
@@ -491,11 +589,26 @@ function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
 
 // ------------------------------------------------------------------ drawing
 
+// sizes on the canvas are given in screen pixels and turned into image pixels:
+// a name tag, a handle or a point looks the same at any zoom and on any picture
+// size, where image-sized ones grew over the objects as the zoom went up
+const fontFamily = () => getComputedStyle(document.body).fontFamily;
+
 function draw() {
   ctx.drawImage(img, 0, 0);
-  const lw = Math.max(2, Math.round((canvas.width + canvas.height) / 700));
-  ctx.lineWidth = lw; ctx.font = `${lw * 7}px system-ui, sans-serif`; ctx.textBaseline = "top";
+  const s = scale() || 1;
+  const lw = Math.max(1, 2 * s);
+  const tagH = 18 * s, tagPad = 5 * s;
+  ctx.lineWidth = lw; ctx.font = `600 ${12 * s}px ${fontFamily()}`; ctx.textBaseline = "middle";
   const skeleton = dataset?.keypoints?.skeleton || [];
+  // a crosshair under the pointer while placing a box: where its corner will land
+  if (hover && !action && tool === "box" && !(task() === "pose" && selected >= 0)) {
+    ctx.save(); ctx.strokeStyle = "rgba(255,255,255,.75)"; ctx.lineWidth = Math.max(1, s);
+    ctx.setLineDash([4 * s, 4 * s]);
+    ctx.beginPath(); ctx.moveTo(hover.x, 0); ctx.lineTo(hover.x, canvas.height);
+    ctx.moveTo(0, hover.y); ctx.lineTo(canvas.width, hover.y); ctx.stroke();
+    ctx.restore(); ctx.lineWidth = lw;
+  }
   boxes.forEach((b, i) => {
     const [x, y, w, h] = pixels(b);
     const color = COLORS[b.cls % COLORS.length];
@@ -537,14 +650,21 @@ function draw() {
         if (on && j === kp) { ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.arc(kx, ky, r + lw, 0, Math.PI * 2); ctx.stroke(); }
       });
     }
+    if (!showTags && !on) return;
     const text = (dataset.classes[b.cls] ?? b.cls) + (b.conf ? ` ${b.conf}` : "");
-    const tw = ctx.measureText(text).width + lw * 4;
-    const ty = y - lw * 9 >= 0 ? y - lw * 9 : y;
-    ctx.fillStyle = color; ctx.fillRect(x, ty, tw, lw * 9);
-    ctx.fillStyle = "#0b0d11"; ctx.fillText(text, x + lw * 2, ty + lw * 1.2);
+    ctx.font = `600 ${12 * s}px ${fontFamily()}`;
+    const tw = ctx.measureText(text).width + tagPad * 2;
+    // above the box; inside it when there is no room or a placed point would be covered
+    const covers = (ty) => (b.kpts || []).some((k) => placed(k) && px(k)[0] >= x - 4 * s && px(k)[0] <= x + tw + 4 * s
+                                              && px(k)[1] >= ty - 4 * s && px(k)[1] <= ty + tagH + 4 * s);
+    let ty = y - tagH;
+    if (ty < 0 || covers(ty)) ty = y;
+    if (covers(ty)) ty = y + h;                     // still in the way: under the box
+    ctx.fillStyle = color; ctx.fillRect(x, ty, tw, tagH);
+    ctx.fillStyle = "#0b0d11"; ctx.fillText(text, x + tagPad, ty + tagH / 2);
   });
-  if (action?.kind === "new") {
-    ctx.strokeStyle = "#fff"; ctx.setLineDash([lw * 2, lw * 2]);
+  if (action?.kind === "new") {                     // the box being drawn, in its class's colour
+    ctx.strokeStyle = COLORS[cls % COLORS.length]; ctx.setLineDash([lw * 3, lw * 2]);
     ctx.strokeRect(action.x0, action.y0, action.x1 - action.x0, action.y1 - action.y0);
     ctx.setLineDash([]);
   }
@@ -559,11 +679,11 @@ function draw() {
   // which keypoint the next click places, beside the pointer
   if (task() === "pose" && selected >= 0 && hover && !action && kptNames().length) {
     const label = kptNames()[kp];
-    ctx.font = `${lw * 6}px system-ui, sans-serif`;
-    const tw = ctx.measureText(label).width + lw * 4;
+    ctx.font = `600 ${12 * s}px ${fontFamily()}`;
+    const tw = ctx.measureText(label).width + tagPad * 2;
     ctx.fillStyle = KCOLORS[kp % KCOLORS.length];
-    ctx.fillRect(hover.x + lw * 4, hover.y + lw * 4, tw, lw * 8);
-    ctx.fillStyle = "#0b0d11"; ctx.fillText(label, hover.x + lw * 6, hover.y + lw * 5);
+    ctx.fillRect(hover.x + 10 * s, hover.y + 10 * s, tw, tagH);
+    ctx.fillStyle = "#0b0d11"; ctx.fillText(label, hover.x + 10 * s + tagPad, hover.y + 10 * s + tagH / 2);
   }
 }
 
@@ -571,6 +691,16 @@ function draw() {
 
 canvas.addEventListener("pointerdown", (e) => {
   if (e.button === 2) return;                   // the context menu handles it
+  if (e.pointerType === "touch") {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {                  // a second finger: pinch to zoom, not draw
+      const [a, b] = [...pointers.values()];
+      if (action?.kind === "new" || action?.kind === "press") action = null;
+      action = { kind: "pinch", dist: Math.hypot(a.x - b.x, a.y - b.y) };
+      draw();
+      return;
+    }
+  }
   if (e.button === 1 || spaceDown) {            // pan instead of drawing
     const stage = canvas.parentElement;
     action = { kind: "pan", x: e.clientX, y: e.clientY,
@@ -605,8 +735,17 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   hover = at(e);
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (action?.kind === "pinch") {
+    if (pointers.size < 2) return;
+    const [a, b] = [...pointers.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (action.dist > 0) zoomBy(dist / action.dist, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    action.dist = dist;
+    return;
+  }
   if (!action) {
-    if (poly || (task() === "pose" && selected >= 0)) draw();
+    draw();                                     // the crosshair, or the next keypoint's name
     return;
   }
   if (action.kind === "pan") {
@@ -646,6 +785,10 @@ canvas.addEventListener("pointermove", (e) => {
     if (action.corner === 1) { x1 = p.x; y0 = p.y; }
     if (action.corner === 2) { x0 = p.x; y1 = p.y; }
     if (action.corner === 3) { x1 = p.x; y1 = p.y; }
+    if (action.corner === 4) y0 = p.y;          // the edges: one side each
+    if (action.corner === 5) x1 = p.x;
+    if (action.corner === 6) y1 = p.y;
+    if (action.corner === 7) x0 = p.x;
     b.cx = (x0 + x1) / 2 / canvas.width; b.cy = (y0 + y1) / 2 / canvas.height;
     b.w = Math.abs(x1 - x0) / canvas.width; b.h = Math.abs(y1 - y0) / canvas.height;
     if (s.points) {                             // an outline stretches with its box
@@ -666,8 +809,15 @@ canvas.addEventListener("pointermove", (e) => {
   draw();
 });
 
-canvas.addEventListener("pointerup", () => {
-  if (!action) return;
+const lift = (e) => {
+  pointers.delete(e.pointerId);
+  if (action?.kind === "pinch" && pointers.size < 2) action = null;
+};
+canvas.addEventListener("pointercancel", lift);
+canvas.addEventListener("pointerup", (e) => {
+  const pinching = action?.kind === "pinch";
+  lift(e);
+  if (pinching || !action) return;
   if (action.kind === "pan") { action = null; return; }
   if (action.kind === "press") {                // a click, not a drag
     const { from, hit, shift } = action;
@@ -769,8 +919,8 @@ function setTool(next) {
 // box deleted meanwhile is simply skipped). The first call downloads it.
 async function outline(objects) {
   objects = objects.filter(Boolean);
-  if (!objects.length) { $("status").textContent = T("윤곽을 딸 상자가 없어요"); return; }
-  $("sam").disabled = true; $("status").textContent = T("윤곽 따는 중…");
+  if (!objects.length) { notify(T("윤곽을 딸 상자가 없어요")); return; }
+  $("sam").disabled = true; notify(T("윤곽 따는 중…"), false, 0);
   try {
     const res = await post(pictureUrl("outline", index),
       { boxes: objects.map(({ cx, cy, w, h }) => ({ cx, cy, w, h })) });
@@ -780,7 +930,8 @@ async function outline(objects) {
       if (points.length >= 3 && boxes.includes(b)) { b.points = points; boxFromPoints(b); }
     });
     touch();
-  } catch (e) { $("status").textContent = T`윤곽을 못 땄어요: ${e.message}`; }
+    $("toast").classList.remove("on");
+  } catch (e) { notify(T`윤곽을 못 땄어요: ${e.message}`, true); }
   finally { $("sam").disabled = false; }
 }
 
@@ -792,7 +943,7 @@ function samOutline() {
 function touch() { dirty = true; renderClasses(); renderKeypoints(); draw(); save(); }
 
 function copyPrevious() {
-  if (!lastBoxes.length) { $("status").textContent = T("복사할 이전 상자가 없어요"); return; }
+  if (!lastBoxes.length) { notify(T("복사할 이전 상자가 없어요")); return; }
   push();
   boxes = boxes.concat(copy(lastBoxes).map((b) => ({ ...b, conf: undefined })));
   selected = -1; touch();
@@ -805,7 +956,7 @@ async function save() {
     await api(pictureUrl("labels", index), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ boxes }), keepalive: true });   // outlives a closing tab
-  } catch (e) { $("status").textContent = e.message; throw e; }
+  } catch (e) { notify(e.message, true); throw e; }
   dataset.files[index].labelled = true;
   dataset.files[index].boxes = boxes.length;
   renderFiles();
@@ -818,11 +969,12 @@ function undo() {
 }
 
 async function autolabel() {
-  $("auto").disabled = true; $("status").textContent = T("자동 라벨 중…");
+  $("auto").disabled = true; notify(T("자동 라벨 중…"), false, 0);
   try {
     const res = await post(pictureUrl("autolabel", index), { conf: 0.35 });
     push(); boxes = boxes.concat(res.boxes); selected = -1; touch();
-  } catch (e) { $("status").textContent = T`자동 라벨이 안 됐어요: ${e.message}`; return; }
+    notify(res.boxes.length ? T`상자 ${res.boxes.length}개를 찾았어요. 확인하고 고쳐 주세요` : T("찾은 물체가 없어요"));
+  } catch (e) { notify(T`자동 라벨이 안 됐어요: ${e.message}`, true); return; }
   finally { $("auto").disabled = false; }
   renderFiles();
 }
@@ -841,6 +993,11 @@ function onKey(e) {
     kp = (kp + (e.shiftKey ? n - 1 : 1)) % n; renderKeypoints(); draw();
   }
   else if (key === "c" && !e.ctrlKey && !e.metaKey) copyPrevious();
+  else if (key === "n" && !e.ctrlKey && !e.metaKey) nextUnlabelled();
+  else if (key === "l" && !e.ctrlKey && !e.metaKey) { showTags = !showTags; draw(); notify(showTags ? T("이름표를 보여요") : T("이름표를 숨겨요 (L)")); }
+  else if ((e.key === "+" || e.key === "=") && !e.ctrlKey) zoomBy(1.25);
+  else if (e.key === "-" && !e.ctrlKey) zoomBy(1 / 1.25);
+  else if (e.key === "0" && !e.ctrlKey) { zoom = 1; applyZoom(); draw(); }
   else if (e.key === "ArrowRight") step(1);
   else if (e.key === "ArrowLeft") step(-1);
   else if ((e.key === "Delete" || e.key === "Backspace") && poly) { poly.pop(); if (!poly.length) poly = null; draw(); }
@@ -880,7 +1037,19 @@ $("sam").onclick = samOutline;
 $("copy").onclick = copyPrevious;
 $("add-class").onclick = addClass;
 $("new-class").onkeydown = (e) => { if (e.key === "Enter") addClass(); };
-$("reset-zoom").onclick = () => { zoom = 1; applyZoom(); };
+$("reset-zoom").onclick = () => { zoom = 1; applyZoom(); draw(); };
+$("zoom-in").onclick = () => zoomBy(1.25);
+$("zoom-out").onclick = () => zoomBy(1 / 1.25);
+
+// the next picture with nothing labelled yet, in the folder on show
+function nextUnlabelled() {
+  const n = dataset.files.length;
+  for (let k = 1; k <= n; k++) {
+    const i = (index + k) % n;
+    if (inFolder(dataset.files[i]) && !dataset.files[i].labelled) return load(i);
+  }
+  notify(T("상자 없는 이미지가 더 없어요"));
+}
 $("only-unlabelled").onchange = (e) => { onlyUnlabelled = e.target.checked; renderFiles(); };
 $("prev").onclick = () => step(-1);
 $("next").onclick = () => step(1);
@@ -896,6 +1065,6 @@ $("undo").onclick = undo;
 $("clear").onclick = () => { push(); boxes = []; selected = -1; touch(); };
 canvas.addEventListener("pointerleave", () => { hover = null; if (!action) draw(); });
 window.addEventListener("beforeunload", save);
-addEventListener("langchange", () => { if (dataset) { document.title = T`${dataset.name} — 상자 그리기`; renderTask(); renderFolders(); renderFiles(); } });
+addEventListener("langchange", () => { if (dataset) { document.title = T`${dataset.name} — 상자 그리기`; renderTask(); renderFolders(); renderFiles(); renderClasses(); renderObjects(); } });
 boot();
 </script>

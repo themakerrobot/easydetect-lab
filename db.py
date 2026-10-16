@@ -79,7 +79,10 @@ ADDED_JOB_COLUMNS = {"patience": "INTEGER", "augment": "INTEGER",
                      # "segment": masks for every box (MobileSAM); NULL: boxes only
                      "task": "TEXT",
                      # 1: export an INT8 IR beside the FP32 one; NULL: FP32 only
-                     "int8": "INTEGER"}
+                     "int8": "INTEGER",
+                     # the end of a failed or stopped run's log, kept apart from
+                     # `detail` so the page can say what went wrong in one line
+                     "log_tail": "TEXT"}
 
 
 class Database:
