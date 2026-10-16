@@ -41,3 +41,18 @@ Pibo로 옮기기
   - OpenCV는 한글을 그리지 못해서, 그림 위의 한글 클래스 이름은 번호(#0, #1…)로 보여요.
     글로 출력되는 이름은 한글 그대로예요.
   - 라즈베리파이 4에서는 사진 한 장에 대략 0.1~0.3초가 걸릴 거예요 (측정 전 추정).
+
+openpibo에서 쓰기 (사물 인식을 이 모델로 바꾸기)
+  openpibo의 Detect는 사물 인식기를 detect.object_detector에 둬요. 이 폴더의
+  Detector가 YoloOnnx와 같은 방식으로 불리니, 한 줄로 바꿔 끼우면 돼요:
+
+      import sys; sys.path.insert(0, "/home/pi/pibo-job{JOB}")
+      from detect import Detector
+      from openpibo.vision_detect import Detect
+
+      detect = Detect()
+      detect.object_detector = Detector("/home/pi/pibo-job{JOB}/model.onnx")
+      items = detect.detect_object(img)        # 이름·점수·상자 목록
+      detect.detect_object_vis(img, items)     # 한글 이름도 그려져요 (PIL)
+
+  원래 모델(yolo11s)로 돌아가려면 detect.load_object_model()을 부르면 돼요.

@@ -121,9 +121,20 @@ def postprocess(boxes, scores, shape, conf=CONF, iou=IOU, max_det=MAX_DET):
 
 class Detector:
     """model.onnx on ONNX Runtime's CPU provider. ``threads``: CPU threads to use
-    (default: all four cores of a Raspberry Pi 4)."""
+    (default: all four cores of a Raspberry Pi 4).
 
-    def __init__(self, model=MODEL, labels=LABELS, threads=None):
+    Also called the way openpibo calls its YoloOnnx, so it drops into
+    ``openpibo.vision_detect.Detect`` as is::
+
+        det = Detector("model.onnx", imgsz=320)
+        boxes, scores, classes = det(img, conf=0.5, iou=0.4)
+        det.name_of(classes[0])
+    """
+
+    def __init__(self, model=MODEL, labels=None, threads=None, imgsz=None):
+        # imgsz: accepted for YoloOnnx's signature; the model's own input size is used
+        if labels is None:
+            labels = os.path.join(os.path.dirname(os.path.abspath(model)), "labels.txt")
         if ort is None:
             raise ImportError("onnxruntime is not installed: pip3 install onnxruntime")
         options = ort.SessionOptions()
@@ -153,6 +164,18 @@ class Detector:
         scores = next(a for a in outputs if a is not boxes)
         return boxes[0], scores[0]
 
+    def name_of(self, cls_id):
+        """The class name of a class number (as YoloOnnx.name_of)."""
+        c = int(cls_id)
+        return self.names[c] if 0 <= c < len(self.names) and self.names[c] else str(c)
+
+    def __call__(self, img, conf=CONF, iou=IOU):
+        """``(boxes (N, 4) x1 y1 x2 y2, scores (N,), classes (N,) int)`` for a BGR
+        picture, surest first — what openpibo's YoloOnnx returns."""
+        boxes, scores = self.raw(img)
+        det = postprocess(boxes, scores, img.shape, conf=conf, iou=iou)
+        return det[:, :4], det[:, 4], det[:, 5].astype(np.int64)
+
     def detect(self, img, conf=CONF, iou=IOU):
         """``[(x1, y1, x2, y2, score, class_name), ...]`` for a BGR picture (or a path),
         surest first, in the picture's own pixels."""
@@ -165,9 +188,7 @@ class Detector:
         det = postprocess(boxes, scores, img.shape, conf=conf, iou=iou)
         out = []
         for x1, y1, x2, y2, score, c in det.tolist():
-            c = int(c)
-            name = self.names[c] if c < len(self.names) and self.names[c] else str(c)
-            out.append((x1, y1, x2, y2, score, name))
+            out.append((x1, y1, x2, y2, score, self.name_of(c)))
         return out
 
 

@@ -203,6 +203,20 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
         assert [f[5] for f in found] == [ours.names[int(c)] for c in expected[:, 5]]
         assert all(isinstance(f[4], float) for f in found)
 
+    # called the way openpibo calls its YoloOnnx: Detect.object_detector = Detector(...)
+    import cv2
+
+    det = detect.Detector(str(Path(here) / "model.onnx"), imgsz=320)
+    img = cv2.imread(str(picture))
+    boxes, scores, classes = det(img, conf=0.5, iou=0.4)
+    assert boxes.shape[1] == 4 and len(boxes) == len(scores) == len(classes)
+    assert classes.dtype.kind == "i"
+    expected = detect.detect(str(picture), conf=0.5, iou=0.4)
+    assert [det.name_of(c) for c in classes] == [f[5] for f in expected]
+    items = [{"name": det.name_of(c), "score": int(s * 100), "box": tuple(int(v) for v in b)}
+             for b, s, c in zip(boxes, scores, classes, strict=True)]  # openpibo's detect_object
+    assert all(i["name"] for i in items)
+
     # the zip is made once per best.pt and then reused
     stamp = (run / "pibo" / "model.onnx").stat().st_mtime_ns
     assert client.get(f"/api/jobs/{job}/download/pibo").status_code == 200
