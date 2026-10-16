@@ -217,6 +217,12 @@ def say(detections, prefix=""):
 
 
 def main(argv=None):
+    # class names may be Korean: a Windows console's code page would print "?"
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description="Detect objects with model.onnx")
     parser.add_argument("source", help="a picture's path, or a camera number (0)")
     parser.add_argument("--conf", type=float, default=CONF, help="smallest score shown (0.5)")

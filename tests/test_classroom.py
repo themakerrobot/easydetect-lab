@@ -214,7 +214,7 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
              "assert 'torch' not in sys.modules and 'easydetect' not in sys.modules; "
              "sys.exit(rc)")
     out = subprocess.run([sys.executable, "-c", check, str(picture)], cwd=here,
-                         capture_output=True, text=True, timeout=120)
+                         capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert out.returncode == 0, out.stderr
     assert "input 160x160, 2 classes (cup, 공)" in out.stdout
 
