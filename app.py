@@ -907,6 +907,7 @@ def create_job(payload: dict):
         device=payload.get("device") or None,
         int8=1 if payload.get("int8") else None,
         **_optimizer_settings(payload),
+        **_decoder_settings(payload),
     )
     return {"id": job_id}
 
@@ -977,6 +978,25 @@ def _optimizer_settings(payload: dict) -> dict:
         out[key] = value
     if payload.get("amp") is not None:
         out["amp"] = int(bool(payload["amp"]))
+    return out
+
+
+#: Decoder queries a run may train with, and how many denoising queries (both
+#: training-time costs: on a CPU most of a step goes to them, not to the picture).
+#: Left out, the model keeps its own (300 and 100). The model keeps ``queries``
+#: after training, so the exported file runs with that many too.
+DECODER_SETTINGS = {"queries": (10, 300, "쿼리 수"), "denoising": (0, 100, "디노이징 쿼리")}
+
+
+def _decoder_settings(payload: dict) -> dict:
+    out = {}
+    for key, (low, high, label) in DECODER_SETTINGS.items():
+        if payload.get(key) in (None, ""):
+            continue
+        value = _whole(payload, key, 0, label)
+        if not low <= value <= high:
+            raise HTTPException(400, f"{label}는 {low}에서 {high} 사이여야 해요")
+        out[key] = value
     return out
 
 
@@ -1105,7 +1125,7 @@ def resume_job(job_id: int, payload: dict = None):
         augment=job["augment"],
         device=job["device"],
         int8=job["int8"],
-        **{key: job[key] for key in (*OPTIMIZER_SETTINGS, "amp")},
+        **{key: job[key] for key in (*OPTIMIZER_SETTINGS, "amp", *DECODER_SETTINGS)},
         detail=f"#{root} 이어서 +{max(add, 1)}에폭",
     )
     return {"id": new_id}
@@ -1330,6 +1350,8 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
                 bundle.writestr("README.md", _card(job, repo, folder_in_repo,
                                                    [p.name for p in files]))
         return FileResponse(archive, filename=f"job{job_id}-{kind}.zip")
+    if kind == "pibo":
+        return _pibo_zip(job, run_dir)
     if kind == "huggingface":
         return _hub_bundle(job, repo, folder_in_repo, pt)
     if kind == "results":
@@ -1355,6 +1377,20 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
             raise HTTPException(404, "로그가 없어요")
         return FileResponse(path, filename=f"job{job_id}-train.log", media_type="text/plain")
     raise HTTPException(404, "모르는 파일 종류예요")
+
+
+def _pibo_zip(job: dict, run_dir: Path):
+    """"Pibo로 보내기": model.onnx + labels.txt + a detect.py that needs only
+    numpy, OpenCV and ONNX Runtime — what a Raspberry Pi robot already has."""
+    import pibo_export
+
+    if job["kind"] != "train" or not (run_dir / "weights" / "best.pt").exists():
+        raise HTTPException(404, "가중치가 없어요")
+    try:
+        archive = pibo_export.build(job, run_dir)
+    except Exception as exc:  # a broken checkpoint, a full disk: say which
+        raise HTTPException(500, f"Pibo용 zip을 만들지 못했어요: {exc}") from exc
+    return FileResponse(archive, filename=archive.name)
 
 
 # ---------------------------------------------------------------- Hugging Face

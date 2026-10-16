@@ -108,15 +108,17 @@
           <div class="hint" id="job-task" hidden></div></div>
         <div class="field"><div class="pb-label">목표</div>
           <div class="row seg full" id="presets">
+            <button class="db" data-preset="classroom">수업용 (CPU)</button>
             <button class="db" data-preset="fast">빠르게</button>
             <button class="db on" data-preset="balanced" aria-pressed="true">균형</button>
             <button class="db" data-preset="accurate">정확하게</button>
           </div>
           <div class="hint" id="preset-hint"></div>
+          <div class="hint" id="preset-note" hidden>노트북 CPU로 사진 300장을 15분 안에 배우도록 맞췄어요. 300장이면 검증용 20%를 빼고 240장 × 35에폭 = 8,400장을 봐요. 4코어 CPU에서 초당 11~15장이라 9~13분, 에폭마다 하는 검증까지 11~15분이에요. 10에폭 동안 나아지지 않으면 일찍 끝나요. 더 느린 노트북이면 에폭을 줄이세요.</div>
           <div class="hint" id="kept" hidden></div>
         </div>
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
-          <select class="inp" id="job-model"><option>dfine-s</option><option>dfine-m</option><option>dfine-l</option></select>
+          <select class="inp" id="job-model"><option>dfine-n</option><option selected>dfine-s</option><option>dfine-m</option><option>dfine-l</option></select>
           <div class="hint">n 가장 가벼움 · s 기본 · m · l · x 가장 정확</div></div>
         <div class="grid2">
           <div><label class="pb-label" for="job-epochs">에폭</label><input class="inp" id="job-epochs" type="number" value="50" min="1" max="10000" step="1" required></div>
@@ -138,6 +140,9 @@
           <div class="grid2">
             <div><label class="pb-label" for="job-imgsz">입력 크기</label><input class="inp" id="job-imgsz" type="number" value="640" step="32" min="32" max="2048" required></div>
             <div><label class="pb-label" for="job-val">검증 비율</label><input class="inp" id="job-val" type="number" value="0.2" step="any" min="0.05" max="0.5"></div>
+            <div><label class="pb-label" for="job-queries">쿼리 수</label><input class="inp" id="job-queries" type="number" step="1" min="10" max="300" placeholder="자동 (300)"></div>
+            <div><label class="pb-label" for="job-denoising">디노이징 쿼리</label><input class="inp" id="job-denoising" type="number" step="1" min="0" max="100" placeholder="자동 (100)"></div>
+            <div class="wide hint" style="margin-top:0">줄이면 한 스텝이 가벼워져요. 100 · 30이면 CPU에서 약 2배 빨라요. 한 사진에 물체가 몇 개뿐일 때 알맞고, 모델은 이 쿼리 수로 돌아요(내보낸 파일도).</div>
             <div class="wide"><label class="pb-label" for="job-device">장치</label>
               <select class="inp" id="job-device"><option value="">자동</option><option value="cpu">CPU</option><option value="0">GPU 0</option></select></div>
           </div>
@@ -297,6 +302,7 @@
             <button id="dl-weights">best.pt <span class="dim">PyTorch</span></button>
             <button id="dl-ir">OpenVINO IR <span class="dim">zip</span></button>
             <button id="dl-onnx">ONNX <span class="dim">zip</span></button>
+            <button id="dl-pibo" title="model.onnx · labels.txt · detect.py — numpy, OpenCV, onnxruntime만으로 돌아요">Pibo로 보내기 <span class="dim">zip</span></button>
             <button id="dl-csv">results.csv</button>
             <button id="dl-log">로그</button>
             <button id="dl-pred">결과 이미지 zip</button>
@@ -550,6 +556,10 @@ async function refresh() {
     gpu = state.gpu;
     if ($("job-batch").value === "4" && !touched.has("job-batch")) $("job-batch").value = "16";
     presetHint();
+  }
+  if (!presetPicked) {                     // no CUDA card: training runs on the CPU
+    presetPicked = true;
+    if (!state.gpu) document.querySelector('#presets button[data-preset="classroom"]').click();
   }
   $("n-data").textContent = datasets.length;
   $("n-models").textContent = registry.models.length;
@@ -824,14 +834,27 @@ async function autolabelAll(datasetId) {
 }
 
 // ---------------------------------------------------------------- training
-const PRESETS = { fast: { imgsz: 320, epochs: 30, batch: 8, freeze: "backbone", patience: 10, augment: false },
-                  balanced: { imgsz: 640, epochs: 50, batch: 4, freeze: "backbone", patience: 15, augment: true },
-                  accurate: { imgsz: 640, epochs: 150, batch: 2, freeze: "", patience: 30, augment: true } };
+// queries / denoising "" leave them to the model (300 / 100). 수업용 (classroom):
+// dfine-n, 100 queries and 30 denoising queries make a CPU step about 2× cheaper
+// (0.52-0.71 s for a batch of 8 at 320 on two 4-core machines, 11-15 pictures/s);
+// 300 pictures keep 240 to train on: × 35 epochs = 8,400, 9-13 min, 11-15 with
+// each epoch's validation (measured: 25.5 s an epoch on the slower machine).
+const PRESETS = {
+  classroom: { model: "dfine-n", imgsz: 320, epochs: 35, batch: 8, freeze: "backbone", patience: 10,
+               augment: false, queries: 100, denoising: 30 },
+  fast: { model: "dfine-s", imgsz: 320, epochs: 30, batch: 8, freeze: "backbone", patience: 10, augment: false,
+          queries: "", denoising: "" },
+  balanced: { model: "dfine-s", imgsz: 640, epochs: 50, batch: 4, freeze: "backbone", patience: 15, augment: true,
+              queries: "", denoising: "" },
+  accurate: { model: "dfine-s", imgsz: 640, epochs: 150, batch: 2, freeze: "", patience: 30, augment: true,
+              queries: "", denoising: "" } };
 function presetHint() {
-  $("preset-hint").textContent = [`${$("job-imgsz").value}px`, T`${$("job-epochs").value}에폭`,
+  $("preset-hint").textContent = [$("job-model").value, `${$("job-imgsz").value}px`, T`${$("job-epochs").value}에폭`,
     T`배치 ${$("job-batch").value}`, $("job-freeze").value ? T("백본 고정") : "",
     Number($("job-patience").value) ? T`${$("job-patience").value}에폭 정체 시 멈춤` : "",
     $("job-augment").checked ? T("증강") : "", $("job-lr").value ? `lr ${$("job-lr").value}` : "",
+    $("job-queries").value || $("job-denoising").value
+      ? T`쿼리 ${$("job-queries").value || 300} · 디노이징 ${$("job-denoising").value || 100}` : "",
     gpu ? gpu.name : "CPU"]
     .filter(Boolean).join(" · ");
   // easydetect's rule when no rate is given: 1e-4 at a batch of 4, × √(batch / 4)
@@ -841,8 +864,12 @@ function presetHint() {
 }
 // A goal fills in the fields you have not touched; one you changed by hand
 // stays as you set it — a button must not quietly undo a choice
-const PRESET_FIELDS = { imgsz: "job-imgsz", epochs: "job-epochs", batch: "job-batch",
-                        freeze: "job-freeze", patience: "job-patience", augment: "job-augment" };
+const PRESET_FIELDS = { model: "job-model", imgsz: "job-imgsz", epochs: "job-epochs", batch: "job-batch",
+                        freeze: "job-freeze", patience: "job-patience", augment: "job-augment",
+                        queries: "job-queries", denoising: "job-denoising" };
+// picked once: 수업용 when PyTorch has no CUDA card (the "CPU 전용" badge), unless
+// someone chose a goal before the first status came back
+let presetPicked = false;
 const touched = new Set();
 const setField = (id, value) => {
   if (touched.has(id)) return;
@@ -859,7 +886,9 @@ function showKept() {
 }
 document.querySelectorAll("#presets button").forEach((b) => {
   b.onclick = () => {
+    presetPicked = true;
     press("#presets button", (x) => x === b);
+    $("preset-note").hidden = b.dataset.preset !== "classroom";
     const p = PRESETS[b.dataset.preset];
     // the CPU batches, times four on a GPU — 16 GB+ holds them at 640
     for (const [key, id] of Object.entries(PRESET_FIELDS))
@@ -881,11 +910,12 @@ presetHint();
 // a field the run cannot start with: marked, opened if it sits under 고급 설정,
 // focused, and said in words beside the button — before anything is sent
 const NUMBER_FIELDS = ["job-epochs", "job-batch", "job-patience", "job-imgsz", "job-val", "job-lr",
-                       "job-lr-bb", "job-warmup", "job-wd", "job-seed"];
+                       "job-lr-bb", "job-warmup", "job-wd", "job-seed", "job-queries", "job-denoising"];
 // what the server names in a refusal, and the field it means
 const SERVER_FIELDS = [["에폭", "job-epochs"], ["배치", "job-batch"], ["입력 크기", "job-imgsz"],
   ["lr_backbone_mult", "job-lr-bb"], ["lr", "job-lr"], ["weight_decay", "job-wd"],
-  ["warmup_epochs", "job-warmup"], ["seed", "job-seed"], ["patience", "job-patience"]];
+  ["warmup_epochs", "job-warmup"], ["seed", "job-seed"], ["patience", "job-patience"],
+  ["쿼리 수", "job-queries"], ["디노이징 쿼리", "job-denoising"]];
 function flagField(id, message) {
   const el = $(id);
   if (el.closest("#adv")) $("adv").open = true;
@@ -930,6 +960,7 @@ $("job-start").onclick = async () => {
         lr: $("job-lr").value, lr_backbone_mult: $("job-lr-bb").value,
         warmup_epochs: $("job-warmup").value, weight_decay: $("job-wd").value,
         seed: $("job-seed").value, amp: $("job-amp").checked, int8: $("job-int8").checked,
+        queries: $("job-queries").value, denoising: $("job-denoising").value,
         val_ratio: Number($("job-val").value), device: $("job-device").value })});
     say("job-msg", T`#${res.id}을(를) 대기열에 넣었어요`, "ok");
     await select(res.id);
@@ -1101,13 +1132,14 @@ function render(job) {
     evaluate: train && has("weights") && !active,
     resume: train && !active,
     "dl-weights": has("weights"), "dl-ir": has("openvino"), "dl-onnx": has("onnx"),
+    "dl-pibo": train && has("weights") && !active,
     "dl-csv": has("results"),
     "dl-log": has("log"), "dl-pred": has("predictions"), "dl-video": has("video"),
     register: train && has("weights") && !active,
     "delete-job": !live,
   };
   Object.entries(show).forEach(([id, on]) => { $(id).hidden = !on; });
-  $("downloads").hidden = !["dl-weights", "dl-ir", "dl-onnx", "dl-csv", "dl-log", "dl-pred", "dl-video"].some((id) => show[id]);
+  $("downloads").hidden = !["dl-weights", "dl-ir", "dl-onnx", "dl-pibo", "dl-csv", "dl-log", "dl-pred", "dl-video"].some((id) => show[id]);
   $("try-row").hidden = !(train && has("weights"));
 
   // a run that ended before its first epoch has no curve to show
@@ -1478,6 +1510,10 @@ const download = (kind) => () => { $("downloads").open = false; location.assign(
 $("dl-weights").onclick = download("weights");
 $("dl-ir").onclick = download("openvino");
 $("dl-onnx").onclick = download("onnx");
+$("dl-pibo").onclick = () => {      // exports model.onnx first: a few seconds
+  say("detail-msg", "Pibo용 zip을 만드는 중이에요. 몇 초 걸려요", "ok");
+  download("pibo")();
+};
 $("dl-csv").onclick = download("results");
 $("dl-log").onclick = download("log");
 $("dl-pred").onclick = download("predictions");

@@ -52,7 +52,16 @@
     "COCO 가중치에서 시작해 내 데이터에 맞춰요. 끝나면 OpenVINO IR과 ONNX도 만들어 둬요.":
       "Starts from the COCO weights and fits them to your data. An OpenVINO IR and an ONNX are exported at the end.",
     "상자를 그린 데이터셋이 아직 없어요.": "No dataset has boxes yet.", "데이터셋 추가하기": "Add a dataset",
-    "목표": "Goal", "빠르게": "Fast", "균형": "Balanced", "정확하게": "Accurate",
+    "목표": "Goal", "빠르게": "Fast", "균형": "Balanced", "정확하게": "Accurate", "수업용 (CPU)": "Classroom (CPU)",
+    "노트북 CPU로 사진 300장을 15분 안에 배우도록 맞췄어요. 300장이면 검증용 20%를 빼고 240장 × 35에폭 = 8,400장을 봐요. 4코어 CPU에서 초당 11~15장이라 9~13분, 에폭마다 하는 검증까지 11~15분이에요. 10에폭 동안 나아지지 않으면 일찍 끝나요. 더 느린 노트북이면 에폭을 줄이세요.":
+      "Set to learn 300 pictures in under 15 minutes on a laptop CPU: 20% are kept for validation, so 240 × 35 epochs = 8,400 pictures. A 4-core CPU does 11-15 a second, so 9-13 minutes, 11-15 with each epoch's validation. It stops early after 10 epochs without improving. On a slower laptop, use fewer epochs.",
+    "쿼리 수": "Queries", "디노이징 쿼리": "Denoising queries", "자동 (300)": "auto (300)", "자동 (100)": "auto (100)",
+    "줄이면 한 스텝이 가벼워져요. 100 · 30이면 CPU에서 약 2배 빨라요. 한 사진에 물체가 몇 개뿐일 때 알맞고, 모델은 이 쿼리 수로 돌아요(내보낸 파일도).":
+      "Fewer make each step lighter: 100 · 30 trains about 2× faster on a CPU. Suits pictures with a handful of objects; the model then runs with this many queries (the exported files too).",
+    "쿼리 {0} · 디노이징 {1}": "queries {0} · denoising {1}",
+    "Pibo로 보내기": "Send to Pibo",
+    "model.onnx · labels.txt · detect.py — numpy, OpenCV, onnxruntime만으로 돌아요": "model.onnx · labels.txt · detect.py — runs with numpy, OpenCV and onnxruntime alone",
+    "Pibo용 zip을 만드는 중이에요. 몇 초 걸려요": "Making the Pibo zip; a few seconds",
     "시작 모델": "Start from", "n 가장 가벼움 · s 기본 · m · l · x 가장 정확": "n lightest · s default · m · l · x most accurate",
     "비워 두면 easydetect가 정해요.": "Left empty, easydetect decides.",
     "겹친 상자 정리 (IoU)": "Overlapping boxes (IoU)", "끄기": "off",
@@ -273,7 +282,8 @@
     "이미지를 찾지 못했어요": "No images found",
     "데이터셋마다 키포인트가 달라요. 먼저 같은 키포인트로 맞춰 주세요": "These datasets have different keypoints; give them the same keypoints first",
     "에폭: 정수로 적어 주세요": "Epochs: enter a whole number", "배치: 정수로 적어 주세요": "Batch: enter a whole number",
-    "입력 크기: 정수로 적어 주세요": "Input size: enter a whole number", "더 할 에폭: 정수로 적어 주세요": "Extra epochs: enter a whole number",
+    "입력 크기: 정수로 적어 주세요": "Input size: enter a whole number",
+    "쿼리 수: 정수로 적어 주세요": "Queries: enter a whole number", "디노이징 쿼리: 정수로 적어 주세요": "Denoising queries: enter a whole number", "더 할 에폭: 정수로 적어 주세요": "Extra epochs: enter a whole number",
     "중지했어요": "Stopped",
 
     // added with the design review: the overview, the panes, the form's checks
@@ -310,6 +320,9 @@
     [/^에폭 (\d+)\/(\d+)에서 중지했어요$/, "Stopped at epoch $1/$2"],
     [/^에폭은 1에서 (\d+) 사이여야 해요$/, "Epochs must be between 1 and $1"],
     [/^배치는 1에서 (\d+) 사이여야 해요$/, "Batch must be between 1 and $1"],
+    [/^쿼리 수는 (\d+)에서 (\d+) 사이여야 해요$/, "Queries must be between $1 and $2"],
+    [/^디노이징 쿼리는 (\d+)에서 (\d+) 사이여야 해요$/, "Denoising queries must be between $1 and $2"],
+    [/^Pibo용 zip을 만들지 못했어요: (.+)$/, "Could not make the Pibo zip: $1"],
     [/^더 할 에폭은 1에서 (\d+) 사이여야 해요$/, "Extra epochs must be between 1 and $1"],
     [/^입력 크기는 32의 배수로, (\d+)에서 (\d+) 사이여야 해요$/, "Input size must be a multiple of 32, from $1 to $2"],
     [/^(\S+)은\(는\) ([\d.e+-]+)에서 ([\d.e+-]+) 사이여야 해요$/, "$1 must be between $2 and $3"],

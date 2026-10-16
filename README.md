@@ -50,6 +50,21 @@ install the CUDA build into that folder once:
 To use a Python you already have (a conda env, say) instead of `.venv`,
 `set LAB_PYTHON=C:\path\to\python.exe` before running it.
 
+### A classroom with no internet: the offline zip
+
+`easydetect-lab-offline-win64.zip` (attached to each
+[release](https://github.com/themakerrobot/easydetect-lab/releases), built by
+`.github/workflows/offline-bundle.yml`) holds Python 3.11, PyTorch for the
+CPU, easydetect, the lab and the weights training starts from. Unzip it and
+double-click `start-lab-offline.bat`: nothing is installed and nothing is
+downloaded. Without a CUDA GPU the training form starts on the **Classroom
+(CPU)** goal — dfine-n at 320 px, 100 queries and 30 denoising queries
+(`train(queries=, denoising=)`, about twice as fast a step on a CPU), 35
+epochs — and a finished run's **Send to Pibo** download is a zip with
+`model.onnx`, `labels.txt` and a `detect.py` that runs on a Raspberry Pi with
+numpy, OpenCV and onnxruntime alone. For teachers, in Korean:
+[docs/classroom.md](docs/classroom.md).
+
 ![the lab](docs/lab.jpg)
 
 [PLAN.md](PLAN.md) is what this is meant to become, and what is missing today.
@@ -252,7 +267,7 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `DELETE /api/models/{id}` | forget it (files stay) |
 | `POST /api/predict` | multipart: `model`, `conf`, and one of `dataset_id`, `path`, `video` (`path` and a `model` given as a path: inside the lab's folders unless `EASYDETECT_LAB_ALLOW_PATHS`) |
 | `POST /api/preview` | multipart: `model`, `conf`, `image` → annotated JPEG, one frame |
-| `POST /api/jobs` | `{dataset_id, model, epochs, imgsz, batch, freeze, device}`, optional `patience`, `augment`, `lr`, `lr_backbone_mult`, `weight_decay`, `warmup_epochs`, `seed`, `amp`, `int8` |
+| `POST /api/jobs` | `{dataset_id, model, epochs, imgsz, batch, freeze, device}`, optional `patience`, `augment`, `lr`, `lr_backbone_mult`, `weight_decay`, `warmup_epochs`, `seed`, `amp`, `int8`, `queries` (10–300), `denoising` (0–100) |
 | `GET /api/jobs` · `GET /api/jobs/{id}` | the second includes per-epoch rows |
 | `GET /api/gpu` | utilisation, memory, temperature and power per GPU, from nvidia-smi |
 | `GET /api/jobs/{id}/stream` | server-sent events: progress, then a status |
@@ -262,6 +277,7 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `POST /api/jobs/{id}/evaluate` | `{conf}` — queue a scoring pass with pictures |
 | `GET /api/jobs/{id}/report` · `/eval/{name}` | the numbers, and the pictures |
 | `GET /api/jobs/{id}/download/{weights,openvino,onnx,results,log,predictions,video}` | |
+| `GET /api/jobs/{id}/download/pibo` | model.onnx (at the run's input size) + labels.txt + a standalone detect.py (numpy, OpenCV, onnxruntime) + README.txt |
 | `GET /api/jobs/{id}/download/huggingface` | `?repo=&folder=&pt=` — the upload folder, zipped, with its README |
 | `GET /api/jobs/{id}/modelcard` | the README.md that bundle would carry, and where it would go |
 | `POST /api/jobs/{id}/predict` | multipart: `image`, `conf` → annotated JPEG |
@@ -341,6 +357,10 @@ its `platform.db`.
 `python run.py`. Windows에서는 `start-lab.bat`을 더블클릭하면 처음 한 번 설치하고 바로 열립니다. 앱 업데이트는 `git pull`, 패키지 업데이트는
 `pip install -U "easydetect[train]"`입니다. 예전 `platform/` 시절 데이터는
 `python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.
+인터넷 없는 교실에서는 릴리스의 `easydetect-lab-offline-win64.zip`을 풀고
+`start-lab-offline.bat`을 더블클릭합니다. GPU가 없으면 학습 목표가 **수업용
+(CPU)** 로 정해지고, 끝난 학습은 *다운로드 → Pibo로 보내기*로 로봇에 옮깁니다.
+선생님용 안내: [docs/classroom.md](docs/classroom.md).
 추론 화면의 *물체 윤곽 칠하기*를 켜면 상자마다 마스크를 칠합니다(MobileSAM, 처음
 한 번 44 MB 내려받음, CPU에서 한 장에 약 150 ms + 상자당 25 ms).
 

@@ -82,7 +82,10 @@ ADDED_JOB_COLUMNS = {"patience": "INTEGER", "augment": "INTEGER",
                      "int8": "INTEGER",
                      # the end of a failed or stopped run's log, kept apart from
                      # `detail` so the page can say what went wrong in one line
-                     "log_tail": "TEXT"}
+                     "log_tail": "TEXT",
+                     # decoder queries and denoising queries while training
+                     # (easydetect's train(queries=, denoising=)); NULL: the model's own
+                     "queries": "INTEGER", "denoising": "INTEGER"}
 
 
 class Database:

@@ -168,6 +168,11 @@ def _optimizer_kwargs(job) -> dict:
     return out
 
 
+def _decoder_kwargs(job) -> dict:
+    """``queries`` / ``denoising`` as ``train()`` takes them; unset ones stay out."""
+    return {key: int(job[key]) for key in ("queries", "denoising") if job.get(key) is not None}
+
+
 class Worker(threading.Thread):
     def __init__(self, db, runs_dir: Path, poll: float = 1.0) -> None:
         super().__init__(daemon=True)
@@ -355,6 +360,7 @@ class Worker(threading.Thread):
                     **({} if job["patience"] is None else {"patience": job["patience"]}),
                     **({} if job["augment"] is None else {"augment": bool(job["augment"])}),
                     **_optimizer_kwargs(job),
+                    **_decoder_kwargs(job),
                     project=str(self.runs_dir),
                     name=run_name,
                     resume=bool(job["resume_of"]),
