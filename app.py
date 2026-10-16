@@ -32,6 +32,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 from easydetect.data.labels import label_path as shared_label_path
+from easydetect.utils.imageio import cv2_path, imread, imwrite  # any path, Hangul included
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -229,7 +230,7 @@ def upload_video(
     scratch = target / f".{int(time.time())}_{Path(video.filename or 'clip').name}"
     _save_upload(video, scratch)
 
-    capture = cv2.VideoCapture(str(scratch))
+    capture = cv2.VideoCapture(cv2_path(scratch))
     if not capture.isOpened():
         scratch.unlink(missing_ok=True)
         _discard(target, dataset)
@@ -243,7 +244,7 @@ def upload_video(
             if not ok:
                 break
             if index % max(int(every), 1) == 0:
-                cv2.imwrite(str(_unique(target / f"{stem}_{index:06d}.jpg")), frame)
+                imwrite(str(_unique(target / f"{stem}_{index:06d}.jpg")), frame)
                 written += 1
             index += 1
     finally:
@@ -363,13 +364,12 @@ def autolabel_one(dataset_id: int, index: int, payload: dict, name: str | None =
 def outline(dataset_id: int, index: int, payload: dict, name: str | None = None):
     """Outlines for boxes on the image on screen — MobileSAM draws, a person
     corrects. The dataset's own fine-tuned mask decoder, once it has one."""
-    import cv2
     import numpy as np
 
     dataset = _dataset(dataset_id)
     image = _image_at(dataset, index, name)
     boxes = payload.get("boxes") or []
-    img = cv2.imread(str(image))
+    img = imread(str(image))
     if img is None:
         raise HTTPException(400, "이미지를 읽지 못했어요")
     h, w = img.shape[:2]

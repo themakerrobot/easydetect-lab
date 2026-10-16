@@ -20,6 +20,8 @@ import time
 import traceback
 from pathlib import Path
 
+from easydetect.utils.imageio import cv2_path, imread, imwrite  # any path, Hangul included
+
 from labeling import (
     dataset_task,
     keypoint_names,
@@ -450,7 +452,6 @@ class Worker(threading.Thread):
         the boxes drawn are the ones the scoring pass produced, caught on their
         way out of the network, rather than a second prediction per picture.
         """
-        import cv2
         import numpy as np
         from easydetect import Detector
         from easydetect.data.dataset import load_data_yaml
@@ -482,7 +483,7 @@ class Worker(threading.Thread):
         for i, image_path in enumerate(val.files):
             if job_id in self.cancelled:
                 raise Cancelled()
-            frame = cv2.imread(str(image_path))
+            frame = imread(str(image_path))
             height, width = frame.shape[:2]
             truth = val._load_labels(image_path)             # cls cx cy w h, normalised
             for c in (truth[:, 0] if len(truth) else ()):
@@ -511,7 +512,7 @@ class Worker(threading.Thread):
                                        **_box_filters(job))[0]
                 predicted = result.boxes
                 painted = draw_boxes(painted, predicted, result.names)
-            cv2.imwrite(str(out / f"{i:04d}_{image_path.stem}.jpg"), painted)
+            imwrite(str(out / f"{i:04d}_{image_path.stem}.jpg"), painted)
             cards.append(
                 {
                     "file": f"{i:04d}_{image_path.stem}.jpg",
@@ -619,12 +620,12 @@ class Worker(threading.Thread):
                     name_ = result.name_of(c)
                     per_class[name_] = per_class.get(name_, 0) + 1
                 name = f"{i:05d}_{Path(frame.path).stem}.jpg"
-                cv2.imwrite(str(out / "images" / name), painted)
+                imwrite(str(out / "images" / name), painted)
                 if frame.kind != "image":
                     if video is None:
                         height, width = painted.shape[:2]
                         video = cv2.VideoWriter(
-                            str(out / "annotated.mp4"),
+                            cv2_path(out / "annotated.mp4"),
                             cv2.VideoWriter_fourcc(*"mp4v"),
                             frame.fps or 25.0,  # play back at the speed it was shot
                             (width, height),

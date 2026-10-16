@@ -164,7 +164,9 @@ jobs:
       - name: Test the bundle offline - unzipped somewhere new, the network blocked
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          $where = Join-Path $env:RUNNER_TEMP "classroom test"     # a space, as in many user folders
+          # a space and Hangul, as on a Korean Windows desktop (OneDrive\바탕 화면): OpenCV
+          # alone cannot open such a path, so training, predicting and the Pibo zip all run here
+          $where = Join-Path $env:RUNNER_TEMP "바탕 화면"
           7z x -bso0 -bsp0 $env:ZIP "-o$where"
           $bundle = Join-Path $where $env:NAME
           $py = Join-Path $bundle "python\python.exe"

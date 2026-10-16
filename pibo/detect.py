@@ -51,6 +51,23 @@ IOU = 0.7
 MAX_DET = 300
 
 
+def imread(path):
+    """cv2.imread for any path (a Windows folder with Hangul in it, too)."""
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+    except OSError:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
+
+
+def imwrite(path, img):
+    """cv2.imwrite for any path."""
+    ok, buf = cv2.imencode(os.path.splitext(path)[1] or ".jpg", img)
+    if ok:
+        buf.tofile(path)
+    return ok
+
+
 def read_labels(path=LABELS):
     """Class names, one per line, in class order."""
     if not os.path.exists(path):
@@ -181,7 +198,7 @@ class Detector:
         surest first, in the picture's own pixels."""
         if isinstance(img, str):
             path = img
-            img = cv2.imread(path)
+            img = imread(path)
             if img is None:
                 raise FileNotFoundError(f"cannot read the picture {path}")
         boxes, scores = self.raw(img)
@@ -267,7 +284,7 @@ def main(argv=None):
         ", ".join(model.names)))
 
     if not args.source.isdigit():                       # a picture
-        img = cv2.imread(args.source)
+        img = imread(args.source)
         if img is None:
             print(f"cannot read the picture {args.source}", file=sys.stderr)
             return 1
@@ -276,7 +293,7 @@ def main(argv=None):
         print(f"{(time.time() - started) * 1000:.0f} ms")
         say(found)
         if args.save:
-            cv2.imwrite(args.save, draw(img, found))
+            imwrite(args.save, draw(img, found))
             print(f"saved {args.save}")
         if args.show:
             cv2.imshow("detect", draw(img, found))
@@ -300,7 +317,7 @@ def main(argv=None):
             if frame_no % max(args.every, 1) == 0:
                 say(found, prefix=f"[{frame_no} · {(time.time() - started) * 1000:.0f} ms] ")
             if args.save:
-                cv2.imwrite(args.save, draw(frame, found))
+                imwrite(args.save, draw(frame, found))
             if args.show:
                 cv2.imshow("detect", draw(frame, found))
                 if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
