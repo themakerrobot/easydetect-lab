@@ -200,7 +200,7 @@ jobs:
           $where = Join-Path $env:RUNNER_TEMP "수업 폴더"
           7z x -bso0 -bsp0 $env:ZIP "-o$where"
           $py = Join-Path $where "$env:NAME\python\python.exe"
-          & $py -c "import torch, openvino, onnxruntime, easydetect; print('torch', torch.__version__, torch.ones(2).sum().item(), 'from', torch.__file__)"
+          & $py -X utf8 -c "import torch, openvino, onnxruntime, easydetect; print('torch', torch.__version__, torch.ones(2).sum().item(), 'from', torch.__file__)"
 
       - uses: actions/upload-artifact@v4
         with:
