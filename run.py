@@ -201,6 +201,15 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_browser:
             webbrowser.open(f"http://{local}:{args.port}/")
         return 0
+    if answer == "lab":
+        # label mode registers the folder in this process; a lab that already
+        # runs on the port owns the database, so it is done from its page
+        print(f"[lab] lab이 이미 켜져 있어요: http://{local}:{args.port}\n"
+              "[lab] 그 lab의 데이터셋 화면에서 '폴더'로 등록하거나, 켜진 lab을 끄고 다시 "
+              "실행하세요 (already running: register the folder from its page)")
+        if not args.no_browser:
+            webbrowser.open(f"http://{local}:{args.port}/")
+        return 0
     if answer is not None:
         print(f"[lab] {args.port}번 포트를 다른 프로그램이 쓰고 있어요. --port 8081 처럼 "
               f"다른 번호로 켜 주세요 (port {args.port} is in use)")

@@ -157,6 +157,27 @@ def _kept_awake():
             state.SetThreadExecutionState(continuous)
 
 
+def _write_new_labels(path: Path, boxes: list[dict], shape) -> bool:
+    """Write a label file only if none is there yet, also when a person saves
+    one while the model was looking at the picture: written aside, then linked
+    into place, which fails rather than replace a file that appeared."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.auto")
+    write_labels(tmp, boxes, shape)
+    try:
+        os.link(tmp, path)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:                    # a file system without links (FAT on a USB stick)
+        if path.exists():
+            return False
+        os.replace(tmp, path)
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def _stopped_note(db, job: dict) -> str:
     """What a stopped job got through, in a line: not the log it was writing."""
     if job["kind"] == "train" and job.get("epochs"):
@@ -464,8 +485,7 @@ class Worker(threading.Thread):
                                       kpt_names=kpt_names)
                 # nothing found is not "nothing there": an empty file would mark
                 # the picture as a labelled background, and it would teach that
-                if boxes:
-                    write_labels(label_path(image), boxes, shape)
+                if boxes and _write_new_labels(label_path(image), boxes, shape):
                     written += 1
             self.db.update_job(job_id, progress=i / len(images))
         self.db.update_job(

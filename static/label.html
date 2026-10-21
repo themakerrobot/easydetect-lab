@@ -468,7 +468,14 @@ function renderFiles() {
 }
 
 async function load(i) {
-  await save();
+  try { await save(); }
+  catch (e) {
+    // a save the server keeps refusing (the list changed in another tab, the
+    // server is gone) must not keep the person on this picture for good
+    if (!confirm(T`이 사진의 상자를 저장하지 못했어요 (${e.message}).\n저장하지 않고 넘어갈까요?`)) return;
+    dirty = false;
+    saving = Promise.resolve();          // given up on: the next picture starts clean
+  }
   if (boxes.length) lastBoxes = copy(boxes);
   index = i; selected = -1; history = []; poly = null;
   boxes = (await api(pictureUrl("labels", i))).boxes;
@@ -953,16 +960,20 @@ function copyPrevious() {
 // other way round (the older one would win). A save that fails leaves the
 // picture unsaved, so the next edit, or moving on, sends it again — and moving
 // on waits for every save before it.
-let saving = Promise.resolve();
+let saving = Promise.resolve(), pending = 0;
+const KEEPALIVE_MAX = 60000;
 function save() {
   if (!dirty) return saving;
   dirty = false;
   const at = index, body = JSON.stringify({ boxes }), count = boxes.length;
+  pending += 1;
   saving = saving.catch(() => {}).then(async () => {
     try {
       await api(pictureUrl("labels", at), {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body, keepalive: true });   // outlives a closing tab
+        // keepalive outlives a closing tab, but browsers cap it at 64 KB: a
+        // picture with many detailed outlines goes as a plain request
+        body, keepalive: body.length < KEEPALIVE_MAX });
     } catch (e) {
       if (at === index) dirty = true;
       notify(T`저장하지 못했어요: ${e.message}`, true);
@@ -971,7 +982,7 @@ function save() {
     dataset.files[at].labelled = true;
     dataset.files[at].boxes = count;
     renderFiles();
-  });
+  }).finally(() => { pending -= 1; });
   return saving;
 }
 
@@ -1078,7 +1089,19 @@ $("auto").onclick = autolabel;
 $("undo").onclick = undo;
 $("clear").onclick = () => { push(); boxes = []; selected = -1; touch(); };
 canvas.addEventListener("pointerleave", () => { hover = null; if (!action) draw(); });
-window.addEventListener("beforeunload", save);
+// leaving with a change unsent, or one waiting behind a save still on its way:
+// send the latest now (keepalive outlives the tab) and let the browser ask
+window.addEventListener("beforeunload", (e) => {
+  // one save on its way finishes by itself (keepalive): ask only when more wait
+  if (!dirty && pending <= 1) return;
+  if (dirty) {
+    dirty = false;
+    const body = JSON.stringify({ boxes });
+    fetch(pictureUrl("labels", index), { method: "POST", keepalive: body.length < KEEPALIVE_MAX,
+      headers: { "Content-Type": "application/json" }, body }).catch(() => {});
+  }
+  e.preventDefault(); e.returnValue = "";
+});
 addEventListener("langchange", () => { if (dataset) { document.title = T`${dataset.name} — 상자 그리기`; renderTask(); renderFolders(); renderFiles(); renderClasses(); renderObjects(); } });
 boot();
 </script>

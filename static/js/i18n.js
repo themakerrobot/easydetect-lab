@@ -50,6 +50,8 @@
     "서버에 닿지 않아요. lab이 켜져 있는지 확인해 주세요": "Cannot reach the server. Is the lab still running?",
     "Pibo용 zip을 받았어요": "Downloaded the Pibo zip",
     "저장하지 못했어요: {0}": "Could not save: {0}",
+    "파일이 너무 커요: {0} MB (최대 {1} MB)": "Too large: {0} MB (at most {1} MB)",
+    "이 사진의 상자를 저장하지 못했어요 ({0}).\n저장하지 않고 넘어갈까요?": "The boxes on this picture could not be saved ({0}).\nMove on without saving them?",
     "기다리는 중이에요. #{0} 다음에 앞선 {1}개가 끝나면 시작해요": "Waiting: starts after #{0} and the {1} queued before it",
     "기다리는 중이에요. 앞선 {0}개가 끝나면 시작해요": "Waiting: starts after the {0} queued before it",
     "이미지를 골라 주세요": "Pick some images", "영상을 골라 주세요": "Pick a video", "zip을 골라 주세요": "Pick a zip",

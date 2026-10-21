@@ -299,3 +299,42 @@ def test_windows_is_kept_awake_for_the_length_of_a_job(monkeypatch):
         assert calls == [0x80000001]
         raise RuntimeError("the job failed")
     assert calls == [0x80000001, 0x80000000]        # and let go, however it ended
+
+
+def test_label_mode_with_the_lab_already_running_says_so(monkeypatch, capsys, tmp_path):
+    import run
+
+    port, server = _serve(_Lab)
+    monkeypatch.setattr(run, "_single_instance", lambda port: pytest.fail("started"))
+    assert run.main(["label", "--source", str(tmp_path), "--port", str(port),
+                     "--no-browser"]) == 0
+    out = capsys.readouterr().out
+    assert "이미 켜져" in out and "다른 프로그램" not in out
+    server.shutdown()
+
+
+def test_auto_label_never_replaces_a_file_saved_while_the_model_looked(tmp_path, monkeypatch):
+    import worker
+
+    path = tmp_path / "labels" / "a.txt"
+    box = [{"cls": 0, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}]
+    assert worker._write_new_labels(path, box, None)
+    path.write_text("0 0.1 0.1 0.1 0.1\n")                # the person's own
+    assert not worker._write_new_labels(path, box, None)
+    assert path.read_text() == "0 0.1 0.1 0.1 0.1\n"
+    assert sorted(p.name for p in path.parent.iterdir()) == ["a.txt"]
+    monkeypatch.setattr(worker.os, "link", lambda a, b: (_ for _ in ()).throw(OSError("FAT")))
+    other = tmp_path / "labels" / "b.txt"
+    assert worker._write_new_labels(other, box, None) and other.read_text().startswith("0 ")
+    assert not worker._write_new_labels(path, box, None)
+
+
+def test_origin_null_is_refused_and_a_listed_proxy_name_is_the_lab_s_own(studio, monkeypatch):
+    client, module = studio
+    upload(client, {"images/a.jpg": image_bytes()})
+    assert client.delete("/api/datasets/1", headers={"Origin": "null"}).status_code == 403
+    monkeypatch.setenv("EASYDETECT_LAB_HOSTS", "testserver,lab.school.kr")
+    # nginx without proxy_set_header Host: the lab sees 127.0.0.1, the page its own name
+    proxied = client.delete("/api/datasets/1", headers={"Host": "127.0.0.1:8080",
+                                                        "Origin": "https://lab.school.kr"})
+    assert proxied.status_code == 200

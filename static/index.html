@@ -543,10 +543,20 @@ $("job-dataset").addEventListener("change", () => {
   setField("job-epochs", classroomEpochs()); presetHint();
 });
 
+// the server refuses an upload over its limit before reading it, and a browser
+// then often reports only a dropped connection: said here, before sending
+let maxUploadMb = null;
+function tooBig(files) {
+  const bytes = (files || []).reduce((n, f) => n + f.size, 0);
+  return maxUploadMb && bytes > maxUploadMb * 1024 * 1024
+    ? T`파일이 너무 커요: ${Math.round(bytes / 1048576)} MB (최대 ${maxUploadMb} MB)` : "";
+}
+
 async function refresh() {
   const [state, datasets, jobs, registry] = await Promise.all([
     api("/api/status"), api("/api/datasets"), api("/api/jobs"), api("/api/models")]);
   allJobs = jobs; allDatasets = datasets; allModels = registry.models;
+  maxUploadMb = state.max_upload_mb || null;
   running = state.running_job;
   const live = jobs.find((j) => j.id === state.running_job);
   const pct = live && live.progress ? ` ${Math.round(live.progress * 100)}%` : "";
@@ -746,6 +756,7 @@ $("ds-upload").onclick = async () => {
     endpoint = "/api/datasets";
   }
 
+  if (tooBig(input && [...input.files])) return msg(tooBig(input && [...input.files]), "err");
   msg("올리는 중…");
   $("ds-upload").disabled = true;
   try {
@@ -1780,6 +1791,7 @@ function showModel(m) {
 $("model-upload").onclick = async () => {
   const files = [...$("model-file").files];
   if (!files.length) return say("model-msg", "파일을 골라 주세요", "err");
+  if (tooBig(files)) return say("model-msg", tooBig(files), "err");
   const main = files.find((f) => /\.(pt|onnx|xml)$/i.test(f.name)) || files[0];
   const form = new FormData();
   files.forEach((f) => form.append("files", f));       // an IR is .xml + .bin together

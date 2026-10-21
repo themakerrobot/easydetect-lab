@@ -55,10 +55,13 @@ def pick_conf(onnx: Path, data_yaml: Path | None) -> float | None:
     one on a tie. None without validation boxes to count."""
     if data_yaml is None or not Path(data_yaml).exists():
         return None
-    from easydetect.data.dataset import DetDataset
+    from easydetect.data.dataset import DetDataset, load_data_yaml
     from easydetect.utils.imageio import imread
 
     try:
+        cfg = load_data_yaml(str(data_yaml))
+        if cfg.get("val") in (None, cfg.get("train")):
+            return None                 # validated on the training pictures: it would flatter
         val = DetDataset(str(data_yaml), "val", 320, augment=False)
     except (ValueError, FileNotFoundError, KeyError):
         return None
@@ -108,21 +111,25 @@ def export_onnx(weights: Path, out_dir: Path, imgsz: int,
     onnx = out_dir / "model.onnx"
     info = out_dir / "model.json"
     with _lock:
+        # both written after this best.pt (model.json last: a failed export
+        # leaves the old one older than the weights, so it is not trusted)
         fresh = (onnx.exists() and info.exists()
                  and onnx.stat().st_mtime_ns >= weights.stat().st_mtime_ns
+                 and info.stat().st_mtime_ns >= weights.stat().st_mtime_ns
                  and json.loads(info.read_text(encoding="utf-8")).get("imgsz") == imgsz)
         if fresh and "conf" not in json.loads(info.read_text(encoding="utf-8")):
             fresh = False                     # written before the threshold was kept
         if not fresh:
             model = Detector(str(weights), verbose=False)
+            info.unlink(missing_ok=True)      # whatever happens next, not the old one
             written = Path(model.export(format="onnx", imgsz=imgsz, out_dir=out_dir,
                                         verbose=False))
-            written.replace(onnx)
             names = {int(k): str(v) for k, v in (model.names or {}).items()}
             queries = int(model.net.decoder.num_queries)
             # the exporter's own sidecar names the file it wrote; ours is model.json
             (out_dir / f"{written.stem}.names.json").unlink(missing_ok=True)
-            conf = pick_conf(onnx, data_yaml)
+            conf = pick_conf(written, data_yaml)
+            written.replace(onnx)
             _write_atomic(info, json.dumps({
                 "imgsz": imgsz, "queries": queries,
                 "names": [names.get(i, str(i)) for i in range(max(names, default=-1) + 1)],
@@ -166,10 +173,20 @@ def build(job: dict, run_dir: Path, data_yaml: Path | None = None) -> Path:
                        "CONF": f"{conf:.2f}" if conf is not None else "0.50",
                        "CONF_FROM": "검증 사진에서 놓치는 것과 잘못 찾는 것이 함께 가장 "
                                     "적었던 값" if conf is not None
-                       else "검증 사진이 없어 기본값"}.items():
+                       else "따로 둔 검증 사진이 없어 기본값"}.items():
         readme = readme.replace("{" + key + "}", str(value))
     archive = run_dir / f"{folder}.zip"
     tmp = run_dir / f".{folder}.{os.getpid()}.{threading.get_ident()}.zip"
+    try:
+        _write_zip(tmp, folder, onnx, names, meta, readme)
+        os.replace(tmp, archive)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return archive
+
+
+def _write_zip(tmp: Path, folder: str, onnx: Path, names: list[str], meta: dict,
+               readme: str) -> None:
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as bundle:
         bundle.write(onnx, f"{folder}/model.onnx")
         _text(bundle, f"{folder}/labels.txt", "\n".join(names) + "\n")
@@ -177,5 +194,3 @@ def build(job: dict, run_dir: Path, data_yaml: Path | None = None) -> Path:
         _text(bundle, f"{folder}/detect.py", (TEMPLATE / "detect.py").read_text(encoding="utf-8"))
         # UTF-8 with a BOM, so that an old Windows Notepad shows the Hangul right too
         _text(bundle, f"{folder}/README.txt", "\ufeff" + readme)
-    os.replace(tmp, archive)
-    return archive

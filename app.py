@@ -71,7 +71,11 @@ db = Database(DATA / "platform.db" if (DATA / "platform.db").exists() else DATA 
 worker = Worker(db, RUNS)
 app = FastAPI(title="easydetect lab")
 #: the largest upload taken, in MB (a dataset zip, a video, a model)
-MAX_UPLOAD_MB = int(os.environ.get("EASYDETECT_LAB_MAX_UPLOAD_MB") or 4096)
+try:
+    MAX_UPLOAD_MB = int(os.environ.get("EASYDETECT_LAB_MAX_UPLOAD_MB") or 4096)
+except ValueError:
+    print("[lab] EASYDETECT_LAB_MAX_UPLOAD_MB is not a number; using 4096")
+    MAX_UPLOAD_MB = 4096
 
 
 def _host_name(netloc: str) -> str:
@@ -82,14 +86,19 @@ def _host_name(netloc: str) -> str:
     return netloc.rsplit(":", 1)[0] if netloc.count(":") == 1 else netloc
 
 
+def _extra_hosts() -> frozenset[str]:
+    """``$EASYDETECT_LAB_HOSTS``: names of the lab's own, a reverse proxy's say."""
+    extra = os.environ.get("EASYDETECT_LAB_HOSTS", "")
+    return frozenset(n.strip().lower() for n in extra.split(",") if n.strip())
+
+
 @functools.lru_cache(maxsize=1)
 def _own_names() -> frozenset[str]:
     names = {"localhost"}
     with contextlib.suppress(OSError):
         host = socket.gethostname().lower()
         names |= {host, f"{host}.local", socket.getfqdn().lower()}
-    extra = os.environ.get("EASYDETECT_LAB_HOSTS", "")
-    return frozenset(names | {n.strip().lower() for n in extra.split(",") if n.strip()})
+    return frozenset(names | _extra_hosts())
 
 
 def _host_allowed(netloc: str) -> bool:
@@ -124,8 +133,13 @@ async def _guard(request, call_next):
                             status_code=403)
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         origin = request.headers.get("origin")
-        if request.headers.get("sec-fetch-site") == "cross-site" or (
-                origin and origin != "null" and urlsplit(origin).netloc.lower() != host.lower()):
+        # "null": a sandboxed frame or a redirected form, never the lab's own page.
+        # A page behind a reverse proxy that rewrites Host has the proxy's name
+        # as its origin: one listed in EASYDETECT_LAB_HOSTS is the lab's own.
+        foreign = origin is not None and (
+            origin == "null" or (urlsplit(origin).netloc.lower() != host.lower()
+                                 and _host_name(urlsplit(origin).netloc) not in _extra_hosts()))
+        if request.headers.get("sec-fetch-site") == "cross-site" or foreign:
             return JSONResponse({"error": "다른 사이트에서 온 요청은 받지 않아요"}, status_code=403)
         length = request.headers.get("content-length")
         if length and length.isdigit() and int(length) > MAX_UPLOAD_MB * 1024 * 1024:
@@ -1339,6 +1353,8 @@ def cancel_job(job_id: int):
             (time.time(), job_id)):
         return {"status": "cancelled"}
     job = db.one("SELECT status FROM jobs WHERE id = ?", (job_id,))   # the worker took it
+    if job is None:
+        raise HTTPException(404, "그런 작업이 없어요")
     if job["status"] == "running":
         worker.cancel(job_id)  # stops at the next epoch or image
     elif job["status"] == "exporting":
@@ -1681,6 +1697,7 @@ def status():
         "running_job": worker.current,
         "queued": len(db.query("SELECT id FROM jobs WHERE status = 'queued'")),
         "datasets": len(db.query("SELECT id FROM datasets")),
+        "max_upload_mb": MAX_UPLOAD_MB,
     }
 
 

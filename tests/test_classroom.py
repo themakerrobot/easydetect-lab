@@ -258,12 +258,13 @@ def test_the_pibo_threshold_is_picked_on_the_validation_pictures(tmp_path, monke
     import pibo_export
 
     data = tmp_path / "data.yaml"
-    (tmp_path / "images").mkdir()
-    (tmp_path / "labels").mkdir()
-    for i in range(3):
-        _picture(tmp_path / "images" / f"{i}.jpg")                    # 320 x 240
-        (tmp_path / "labels" / f"{i}.txt").write_text("0 0.4375 0.5 0.375 0.5\n")
-    data.write_text("path: .\ntrain: images\nval: images\nnames: {0: cup}\n")
+    for split in ("train", "val"):
+        (tmp_path / "images" / split).mkdir(parents=True)
+        (tmp_path / "labels" / split).mkdir(parents=True)
+        for i in range(3):
+            _picture(tmp_path / "images" / split / f"{i}.jpg")         # 320 x 240
+            (tmp_path / "labels" / split / f"{i}.txt").write_text("0 0.4375 0.5 0.375 0.5\n")
+    data.write_text("path: .\ntrain: images/train\nval: images/val\nnames: {0: cup}\n")
 
     class Fake:
         def __call__(self, img, conf=None, iou=None):
@@ -275,8 +276,34 @@ def test_the_pibo_threshold_is_picked_on_the_validation_pictures(tmp_path, monke
     monkeypatch.setattr(pibo_export, "_pibo_detector", lambda onnx: Fake())
     assert 0.4 < pibo_export.pick_conf(tmp_path / "m.onnx", data) <= 0.6
     assert pibo_export.pick_conf(tmp_path / "m.onnx", None) is None
-    (tmp_path / "noval.yaml").write_text("path: .\ntrain: images\nnames: {0: cup}\n")
+    (tmp_path / "noval.yaml").write_text("path: .\ntrain: images/train\nnames: {0: cup}\n")
     assert pibo_export.pick_conf(tmp_path / "m.onnx", tmp_path / "noval.yaml") is None
+    # under 4 labelled pictures the lab validates on the training ones: no pick then
+    (tmp_path / "same.yaml").write_text("path: .\ntrain: images/val\nval: images/val\n"
+                                        "names: {0: cup}\n")
+    assert pibo_export.pick_conf(tmp_path / "m.onnx", tmp_path / "same.yaml") is None
+
+
+def test_a_failed_threshold_pick_leaves_no_stale_model_json_behind(tmp_path, monkeypatch):
+    """The export after a new best.pt fails half-way: the next one starts over
+    instead of shipping the old names and threshold with the new model."""
+    import os
+
+    import pibo_export
+
+    weights = _tiny_checkpoint(tmp_path / "run" / "weights" / "best.pt", {0: "cup"})
+    out = tmp_path / "run" / "pibo"
+    _, meta = pibo_export.export_onnx(weights, out, 160)
+    assert meta["names"] == ["cup"]
+    _tiny_checkpoint(weights, {0: "cup", 1: "공"})                # trained again
+    stamp = (out / "model.onnx").stat().st_mtime_ns + 10**9
+    os.utime(weights, ns=(stamp, stamp))
+    monkeypatch.setattr(pibo_export, "pick_conf", lambda *a: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        pibo_export.export_onnx(weights, out, 160)
+    monkeypatch.undo()
+    _, meta = pibo_export.export_onnx(weights, out, 160)
+    assert meta["names"] == ["cup", "공"]
 
 
 def test_detect_py_uses_the_model_s_threshold_and_a_pinned_one_wins(tmp_path):
