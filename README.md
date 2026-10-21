@@ -34,8 +34,10 @@ changing the package, and only then. `pip uninstall easydetect` and
 
 `start-lab.bat` in this folder starts the lab and opens the browser. The first
 time it makes a `.venv` folder beside it and installs everything into it (a few
-minutes; it needs [Python](https://www.python.org/downloads/) 3.10 or newer,
-installed with *Add python.exe to PATH*); after a `git pull` that changes
+minutes; it needs [Python](https://www.python.org/downloads/) 3.10 to 3.13 —
+3.12 is safest, and the newest release often has no onnxruntime or PyTorch yet
+— installed with *Add python.exe to PATH*; with several installed it picks
+3.12 first); after a `git pull` that changes
 `requirements.txt` it installs again. Closing the window stops the lab.
 It opens the lab to this PC only; `start-lab.bat --host 0.0.0.0` lets other
 machines in (Windows then asks once whether Python may use the network).

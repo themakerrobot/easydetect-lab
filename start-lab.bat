@@ -29,10 +29,19 @@ goto run
 :install
 echo [lab] 처음 실행이라 필요한 것을 설치합니다. 몇 분 걸려요...
 set "PY="
-py -3 --version >nul 2>nul && set "PY=py -3"
+rem a version every package has wheels for first: the newest Python (3.14, 3.15)
+rem often waits months for onnxruntime and torch, and pip then finds nothing
+for %%v in (3.12 3.11 3.13 3.10) do (
+  if not defined PY py -%%v --version >nul 2>nul && set "PY=py -%%v"
+)
+if not defined PY py -3 --version >nul 2>nul && set "PY=py -3"
 if not defined PY python --version >nul 2>nul && set "PY=python"
 if not defined PY goto nopython
 %PY% -c "import sys; sys.exit(sys.version_info < (3, 10))" || goto oldpython
+%PY% -c "import sys; sys.exit(sys.version_info >= (3, 14))" || (
+  echo [lab] 주의: Python이 너무 새 버전이에요. onnxruntime·torch가 아직 없을 수 있어요.
+  echo [lab]       설치가 실패하면 https://www.python.org/downloads/ 에서 3.12를 깔아 주세요.
+)
 %PY% -m venv "%VENV%" || goto fail
 
 :deps
