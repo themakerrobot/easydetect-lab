@@ -114,7 +114,7 @@
             <button class="db" data-preset="accurate">정확하게</button>
           </div>
           <div class="hint" id="preset-hint"></div>
-          <div class="hint" id="preset-note" hidden>노트북 CPU로 사진 300장을 15분 안에 배우도록 맞췄어요. 300장이면 검증용 20%를 빼고 240장 × 35에폭 = 8,400장을 봐요. 4코어 CPU에서 초당 11~15장이라 9~13분, 에폭마다 하는 검증까지 11~15분이에요. 10에폭 동안 나아지지 않으면 일찍 끝나요. 더 느린 노트북이면 에폭을 줄이세요.</div>
+          <div class="hint" id="preset-note" hidden>노트북 CPU로 사진 300장을 15분 안에 배우도록 맞췄어요. 300장이면 검증용 20%를 빼고 240장 × 35에폭 = 8,400장을 봐요. 4코어 CPU에서 초당 11~15장이라 9~13분, 에폭마다 하는 검증까지 11~15분이에요. 사진이 적으면 에폭을 늘려요(100장이면 100에폭): 적은 사진은 더 여러 번 봐야 잘 배우고, 걸리는 시간은 비슷해요. 25에폭 동안 나아지지 않으면 일찍 끝나요. 더 느린 노트북이면 에폭을 줄이세요.</div>
           <div class="hint" id="kept" hidden></div>
         </div>
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
@@ -537,6 +537,11 @@ function showTrainTask() {
   $("job-task").textContent = text ? T(text) : "";
 }
 $("job-dataset").addEventListener("change", showTrainTask);
+// 수업용: the epochs follow the dataset's size until someone sets them by hand
+$("job-dataset").addEventListener("change", () => {
+  if (document.querySelector('#presets button.on')?.dataset.preset !== "classroom") return;
+  setField("job-epochs", classroomEpochs()); presetHint();
+});
 
 async function refresh() {
   const [state, datasets, jobs, registry] = await Promise.all([
@@ -573,7 +578,7 @@ async function refresh() {
     const trainable = datasets.filter((d) => d.labelled > 0);
     const keepDs = $("job-dataset").value;
     $("job-dataset").innerHTML = trainable.map((d) =>
-      `<option value="${d.id}">${esc(d.name)} · ${T`라벨 ${d.labelled}/${d.images}`}</option>`).join("");
+      `<option value="${d.id}" data-labelled="${d.labelled}">${esc(d.name)} · ${T`라벨 ${d.labelled}/${d.images}`}</option>`).join("");
     if (keepDs && trainable.some((d) => String(d.id) === keepDs)) $("job-dataset").value = keepDs;
     trainTasks = Object.fromEntries(datasets.map((d) => [String(d.id), d.task]));
     showTrainTask();
@@ -839,8 +844,20 @@ async function autolabelAll(datasetId) {
 // (0.52-0.71 s for a batch of 8 at 320 on two 4-core machines, 11-15 pictures/s);
 // 300 pictures keep 240 to train on: × 35 epochs = 8,400, 9-13 min, 11-15 with
 // each epoch's validation (measured: 25.5 s an epoch on the slower machine).
+// A smaller set needs more epochs, not fewer: on 92-143 pictures 30 epochs left
+// dfine-n 0.07-0.2 mAP short of 100 (three seeds each), so the classroom epochs
+// aim at about 1,000 steps — 35 for 300 pictures, up to 100 for a few dozen —
+// and a CPU run stays near the same 10-15 minutes.
+const CLASSROOM_STEPS = 1000;
+function classroomEpochs() {
+  const opt = $("job-dataset").selectedOptions[0];
+  const labelled = Number(opt?.dataset.labelled) || 300;
+  const batch = Math.max(1, Number($("job-batch").value) || 8);
+  const steps = Math.max(1, Math.ceil(Math.max(1, Math.round(labelled * 0.8)) / batch));
+  return Math.min(100, Math.max(35, Math.round(CLASSROOM_STEPS / steps)));
+}
 const PRESETS = {
-  classroom: { model: "dfine-n", imgsz: 320, epochs: 35, batch: 8, freeze: "backbone", patience: 10,
+  classroom: { model: "dfine-n", imgsz: 320, epochs: "auto", batch: 8, freeze: "backbone", patience: 25,
                augment: false, queries: 100, denoising: 30 },
   fast: { model: "dfine-s", imgsz: 320, epochs: 30, batch: 8, freeze: "backbone", patience: 10, augment: false,
           queries: "", denoising: "" },
@@ -892,7 +909,8 @@ document.querySelectorAll("#presets button").forEach((b) => {
     const p = PRESETS[b.dataset.preset];
     // the CPU batches, times four on a GPU — 16 GB+ holds them at 640
     for (const [key, id] of Object.entries(PRESET_FIELDS))
-      setField(id, key === "batch" && gpu ? p.batch * 4 : p[key]);
+      if (p[key] !== "auto") setField(id, key === "batch" && gpu ? p.batch * 4 : p[key]);
+    if (p.epochs === "auto") setField("job-epochs", classroomEpochs());   // after the batch
     presetHint(); showKept();
   };
 });
