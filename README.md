@@ -59,10 +59,17 @@ CPU, easydetect, the lab and the weights training starts from. Unzip it and
 double-click `start-lab-offline.bat`: nothing is installed and nothing is
 downloaded. Without a CUDA GPU the training form starts on the **Classroom
 (CPU)** goal — dfine-n at 320 px, 100 queries and 30 denoising queries
-(`train(queries=, denoising=)`, about twice as fast a step on a CPU), 35
-epochs — and a finished run's **Send to Pibo** download is a zip with
+(`train(queries=, denoising=)`, about twice as fast a step on a CPU), the
+backbone frozen, and epochs set from the dataset: about 1,000 steps, so 35
+epochs for 300 pictures and up to 100 for a few dozen. Small sets need the
+extra passes — on 92–143 pictures, 100 epochs scored 0.12–0.19 mAP50-95 above
+30 (three seeds each) — and the time on a laptop stays near the same 10–15
+minutes. A class COCO already knows (`apple`, `cup`, `사과`, `컵` …) starts
+from what the COCO weights know of it (easydetect 0.7.5), so it learns from
+far fewer pictures. A finished run's **Send to Pibo** download is a zip with
 `model.onnx`, `labels.txt` and a `detect.py` that runs on a Raspberry Pi with
-numpy, OpenCV and onnxruntime alone. For teachers, in Korean:
+numpy, OpenCV and onnxruntime alone — about 160 ms a picture for a classroom
+model on a Raspberry Pi 4B. For teachers, in Korean:
 [docs/classroom.md](docs/classroom.md).
 
 ![the lab](docs/lab.jpg)
@@ -359,7 +366,10 @@ its `platform.db`.
 `python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.
 인터넷 없는 교실에서는 릴리스의 `easydetect-lab-offline-win64.zip`을 풀고
 `start-lab-offline.bat`을 더블클릭합니다. GPU가 없으면 학습 목표가 **수업용
-(CPU)** 로 정해지고, 끝난 학습은 *다운로드 → Pibo로 보내기*로 로봇에 옮깁니다.
+(CPU)** 로 정해지고, 에폭은 데이터 크기에 맞춰 정해집니다(300장이면 35에폭, 수십
+장이면 100에폭까지; 노트북에서 10~15분 안팎). 사과·컵처럼 COCO에 있는 물체는
+COCO가 아는 것에서 시작해 적은 사진으로도 잘 배웁니다. 끝난 학습은 *다운로드 →
+Pibo로 보내기*로 로봇에 옮기고, 라즈베리파이 4B에서 한 장에 약 0.16초입니다.
 선생님용 안내: [docs/classroom.md](docs/classroom.md).
 추론 화면의 *물체 윤곽 칠하기*를 켜면 상자마다 마스크를 칠합니다(MobileSAM, 처음
 한 번 44 MB 내려받음, CPU에서 한 장에 약 150 ms + 상자당 25 ms).
