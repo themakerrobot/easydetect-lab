@@ -136,10 +136,32 @@ def _tail(path: Path, lines: int = 12) -> str:
     return "\n".join(text[-lines:])[-2000:]
 
 
+@contextlib.contextmanager
+def _kept_awake():
+    """Windows goes to sleep after its idle time even in the middle of a run
+    (a laptop left training over lunch); told so, it stays awake until the job
+    ends. The screen may still turn off. Elsewhere: nothing."""
+    if os.name != "nt":
+        yield
+        return
+    import ctypes
+
+    continuous, system_required = 0x80000000, 0x00000001
+    state = getattr(getattr(ctypes, "windll", None), "kernel32", None)
+    with contextlib.suppress(Exception):
+        state.SetThreadExecutionState(continuous | system_required)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            state.SetThreadExecutionState(continuous)
+
+
 def _stopped_note(db, job: dict) -> str:
     """What a stopped job got through, in a line: not the log it was writing."""
     if job["kind"] == "train" and job.get("epochs"):
-        row = db.one("SELECT COUNT(*) AS n FROM epochs WHERE job_id = ?", (job["id"],))
+        # the epoch it reached, not how many this job ran: a resumed one starts part-way
+        row = db.one("SELECT MAX(epoch) AS n FROM epochs WHERE job_id = ?", (job["id"],))
         return f"에폭 {(row or {}).get('n') or 0}/{job['epochs']}에서 중지했어요"
     return "중지했어요"
 
@@ -238,39 +260,49 @@ class Worker(threading.Thread):
             if job is None:
                 time.sleep(self.poll)
                 continue
+            # a cancel between the SELECT and here would otherwise be run over
+            if not self.db.claim_job(job["id"]):
+                continue
+            job["status"] = "running"
             self.current = job["id"]
             try:
-                if job["kind"] == "autolabel":
-                    self._autolabel(job)
-                elif job["kind"] == "evaluate":
-                    self._evaluate(job)
-                elif job["kind"] == "predict":
-                    self._predict(job)
-                else:
-                    self._train(job)
-            except Cancelled:
-                self.db.update_job(job["id"], status="cancelled", finished=time.time(),
-                                   detail=_stopped_note(self.db, job))
-                self.salvage(job["id"])
-            except Exception as exc:
-                # the error in `detail`, one line; what led up to it in `log_tail`
-                # (the trainer's log when it wrote one, else the last progress line)
-                previous = self.db.one("SELECT detail, log_tail FROM jobs WHERE id = ?",
-                                       (job["id"],)) or {}
-                self.db.update_job(
-                    job["id"],
-                    status="failed",
-                    detail=f"{type(exc).__name__}: {exc}",
-                    log_tail=previous.get("log_tail") or previous.get("detail") or None,
-                    finished=time.time(),
-                )
-                self.salvage(job["id"])
-                traceback.print_exc()
+                with _kept_awake():
+                    self._run_one(job)
             finally:
                 self.cancelled.discard(job["id"])
                 self.current = None
                 with contextlib.suppress(Exception):   # tidying up never stops the loop
                     _release_memory()
+
+    def _run_one(self, job: dict) -> None:
+        """One job, its end written down however it ends."""
+        try:
+            if job["kind"] == "autolabel":
+                self._autolabel(job)
+            elif job["kind"] == "evaluate":
+                self._evaluate(job)
+            elif job["kind"] == "predict":
+                self._predict(job)
+            else:
+                self._train(job)
+        except Cancelled:
+            self.db.update_job(job["id"], status="cancelled", finished=time.time(),
+                               detail=_stopped_note(self.db, job))
+            self.salvage(job["id"])
+        except Exception as exc:
+            # the error in `detail`, one line; what led up to it in `log_tail`
+            # (the trainer's log when it wrote one, else the last progress line)
+            previous = self.db.one("SELECT detail, log_tail FROM jobs WHERE id = ?",
+                                   (job["id"],)) or {}
+            self.db.update_job(
+                job["id"],
+                status="failed",
+                detail=f"{type(exc).__name__}: {exc}",
+                log_tail=previous.get("log_tail") or previous.get("detail") or None,
+                finished=time.time(),
+            )
+            self.salvage(job["id"])
+            traceback.print_exc()
 
     # -- the two kinds of work ---------------------------------------------
 
@@ -426,15 +458,21 @@ class Worker(threading.Thread):
         for i, image in enumerate(images, start=1):
             if job_id in self.cancelled:
                 raise Cancelled()
-            boxes = predict_boxes(model, image, names, conf=job["conf"] or 0.35,
-                                  kpt_names=kpt_names)
-            write_labels(label_path(image), boxes, shape)
-            written += bool(boxes)
+            # someone labelled it while this job ran: theirs stays
+            if not label_path(image).exists():
+                boxes = predict_boxes(model, image, names, conf=job["conf"] or 0.35,
+                                      kpt_names=kpt_names)
+                # nothing found is not "nothing there": an empty file would mark
+                # the picture as a labelled background, and it would teach that
+                if boxes:
+                    write_labels(label_path(image), boxes, shape)
+                    written += 1
             self.db.update_job(job_id, progress=i / len(images))
         self.db.update_job(
             job_id,
             status="done",
-            detail=f"{len(images)} images labelled, {written} with boxes — check them",
+            detail=f"{written} of {len(images)} images got boxes — check them; "
+                   "the rest stay unlabelled",
             progress=1.0,
             finished=time.time(),
         )

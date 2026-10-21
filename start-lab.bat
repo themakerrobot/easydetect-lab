@@ -7,6 +7,12 @@ rem   set LAB_PYTHON=C:\path\to\python.exe   before running this file.
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+rem OneDrive syncs every file as it is written: the database, the .venv and each
+rem epoch's weights, which slows training and can lock the database mid-run
+echo "%~dp0" | find /i "OneDrive" >nul && (
+  echo [lab] 주의: 이 폴더는 OneDrive 안에 있어요. 동기화가 학습을 느리게 하고 파일을 잠글 수 있어요.
+  echo [lab]       C:\easydetect-lab 처럼 OneDrive 밖으로 옮겨서 실행하는 걸 권해요.
+)
 
 if defined LAB_PYTHON (
   set "PYEXE=%LAB_PYTHON%"

@@ -18,10 +18,12 @@ import asyncio
 import contextlib
 import functools
 import io
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -29,6 +31,7 @@ import weakref
 import zipfile
 from collections import OrderedDict
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 import yaml
 from easydetect.data.labels import label_path as shared_label_path
@@ -67,6 +70,69 @@ DATASETS, RUNS = DATA / "datasets", DATA / "runs"
 db = Database(DATA / "platform.db" if (DATA / "platform.db").exists() else DATA / "lab.db")
 worker = Worker(db, RUNS)
 app = FastAPI(title="easydetect lab")
+#: the largest upload taken, in MB (a dataset zip, a video, a model)
+MAX_UPLOAD_MB = int(os.environ.get("EASYDETECT_LAB_MAX_UPLOAD_MB") or 4096)
+
+
+def _host_name(netloc: str) -> str:
+    """``"192.168.0.5:8080"`` -> ``"192.168.0.5"``, ``"[::1]:8080"`` -> ``"::1"``."""
+    netloc = netloc.strip().lower()
+    if netloc.startswith("["):
+        return netloc[1:netloc.find("]")] if "]" in netloc else netloc
+    return netloc.rsplit(":", 1)[0] if netloc.count(":") == 1 else netloc
+
+
+@functools.lru_cache(maxsize=1)
+def _own_names() -> frozenset[str]:
+    names = {"localhost"}
+    with contextlib.suppress(OSError):
+        host = socket.gethostname().lower()
+        names |= {host, f"{host}.local", socket.getfqdn().lower()}
+    extra = os.environ.get("EASYDETECT_LAB_HOSTS", "")
+    return frozenset(names | {n.strip().lower() for n in extra.split(",") if n.strip()})
+
+
+def _host_allowed(netloc: str) -> bool:
+    """An address, or a name of this machine (or one in ``$EASYDETECT_LAB_HOSTS``).
+
+    A web page elsewhere can point a name of its own at this machine's
+    address (DNS rebinding) and then read the lab as if it were the same
+    site; such a request carries that other name, and is refused."""
+    host = _host_name(netloc)
+    if host in _own_names() or host.endswith(".localhost"):
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+@app.middleware("http")
+async def _guard(request, call_next):
+    """Requests from this lab's own pages only, and uploads of a sane size.
+
+    A page on another site can make the browser send a POST here (it cannot
+    read the answer, but a POST is enough to delete a dataset): browsers say
+    where such a request comes from, in ``Origin`` and ``Sec-Fetch-Site``,
+    and those that are not this lab are refused. Scripts and curl send
+    neither and are let through: they run on a machine already trusted."""
+    host = request.headers.get("host", "")
+    if host and not _host_allowed(host):
+        return JSONResponse({"error": f"이 주소({_host_name(host)})로는 lab을 열 수 없어요. "
+                                      "IP 주소로 열거나 EASYDETECT_LAB_HOSTS에 이름을 넣어 주세요"},
+                            status_code=403)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        if request.headers.get("sec-fetch-site") == "cross-site" or (
+                origin and origin != "null" and urlsplit(origin).netloc.lower() != host.lower()):
+            return JSONResponse({"error": "다른 사이트에서 온 요청은 받지 않아요"}, status_code=403)
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > MAX_UPLOAD_MB * 1024 * 1024:
+            return JSONResponse({"error": f"파일이 너무 커요 (최대 {MAX_UPLOAD_MB} MB). "
+                                          "EASYDETECT_LAB_MAX_UPLOAD_MB로 늘릴 수 있어요"},
+                                status_code=413)
+    return await call_next(request)
 # the themaker-ui design kit and its fonts; the pages link them relatively
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 #: loaded models, least recently used first: (task, resolved path or name, mtime) -> Detector
@@ -625,7 +691,7 @@ def delete_dataset(dataset_id: int):
     """Forget a dataset. Uploaded copies are removed; registered folders are left alone."""
     dataset = _dataset(dataset_id)
     running = db.one(
-        "SELECT id FROM jobs WHERE dataset_id = ? AND status IN ('queued', 'running')",
+        "SELECT id FROM jobs WHERE dataset_id = ? AND status IN ('queued', 'running', 'exporting')",
         (dataset_id,),
     )
     if running:
@@ -1268,9 +1334,12 @@ def cancel_job(job_id: int):
     job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
     if job is None:
         raise HTTPException(404, "그런 작업이 없어요")
-    if job["status"] == "queued":
-        db.update_job(job_id, status="cancelled", finished=time.time())
-    elif job["status"] == "running":
+    if job["status"] == "queued" and db.change(
+            "UPDATE jobs SET status = 'cancelled', finished = ? WHERE id = ? AND status = 'queued'",
+            (time.time(), job_id)):
+        return {"status": "cancelled"}
+    job = db.one("SELECT status FROM jobs WHERE id = ?", (job_id,))   # the worker took it
+    if job["status"] == "running":
         worker.cancel(job_id)  # stops at the next epoch or image
     elif job["status"] == "exporting":
         # the training is over and the export is a few seconds; stopping here
@@ -1387,7 +1456,9 @@ def _pibo_zip(job: dict, run_dir: Path):
     if job["kind"] != "train" or not (run_dir / "weights" / "best.pt").exists():
         raise HTTPException(404, "가중치가 없어요")
     try:
-        archive = pibo_export.build(job, run_dir)
+        dataset = db.one("SELECT path FROM datasets WHERE id = ?", (job["dataset_id"],))
+        data_yaml = Path(dataset["path"]) / "data.yaml" if dataset else None
+        archive = pibo_export.build(job, run_dir, data_yaml)
     except Exception as exc:  # a broken checkpoint, a full disk: say which
         raise HTTPException(500, f"Pibo용 zip을 만들지 못했어요: {exc}") from exc
     return FileResponse(archive, filename=archive.name)
@@ -1426,9 +1497,9 @@ def _card_facts(job: dict, repo: str, folder: str, files: list[str]) -> dict:
     weights = run_dir / "weights" / "best.pt"
     if (variant is None or not names) and weights.exists():
         try:
-            import torch
+            from easydetect.utils.checkpoint import load_checkpoint
 
-            ckpt = torch.load(weights, map_location="cpu", weights_only=False)
+            ckpt = load_checkpoint(weights)
             variant = variant or ckpt.get("variant")
             names = names or [v for _, v in sorted(ckpt.get("names", {}).items())]
         except Exception:  # noqa: BLE001 — a card with less in it beats no card

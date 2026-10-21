@@ -113,8 +113,8 @@ def test_the_classroom_preset_is_in_the_form_and_picked_without_a_gpu(studio):
 def test_the_lab_asks_for_the_easydetect_that_has_queries():
     import run
 
-    assert run.EASYDETECT_AT_LEAST == "0.7.6"
-    assert "easydetect[train]>=0.7.6" in (ROOT / "requirements.txt").read_text()
+    assert run.EASYDETECT_AT_LEAST == "0.7.7"
+    assert "easydetect[train]>=0.7.7" in (ROOT / "requirements.txt").read_text()
 
 
 # ---------------------------------------------------------------- Pibo
@@ -176,12 +176,18 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
     folder = f"pibo-job{job}"
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
         assert sorted(zf.namelist()) == [f"{folder}/{n}" for n in
-                                         ("README.txt", "detect.py", "labels.txt", "model.onnx")]
+                                         ("README.txt", "detect.py", "labels.txt", "model.json",
+                                          "model.onnx")]
         zf.extractall(tmp_path / "pibo")
     here = tmp_path / "pibo" / folder
     assert (here / "labels.txt").read_text(encoding="utf-8") == "cup\n공\n"
     readme = (here / "README.txt").read_text(encoding="utf-8-sig")
     assert f"작업 #{job}" in readme and "160x160" in readme and "{" not in readme
+    meta = json.loads((here / "model.json").read_text(encoding="utf-8"))
+    assert meta["imgsz"] == 160 and meta["names"] == ["cup", "공"]
+    assert meta["conf"] is None or 0.25 <= meta["conf"] <= 0.7
+    # the run's zip is written whole or not at all: nothing half-done is left
+    assert not [p for p in run.iterdir() if p.name.startswith(".")]
 
     import onnxruntime as ort
 
@@ -244,3 +250,50 @@ def test_pibo_needs_trained_weights(studio):
     run.mkdir(parents=True)
     module.db.update_job(job, status="failed", run_dir=str(run))
     assert client.get(f"/api/jobs/{job}/download/pibo").status_code == 404
+
+
+def test_the_pibo_threshold_is_picked_on_the_validation_pictures(tmp_path, monkeypatch):
+    """Best F1 among 0.25-0.70: a model whose right boxes score 0.6 and wrong
+    ones 0.4 gets a threshold between them."""
+    import pibo_export
+
+    data = tmp_path / "data.yaml"
+    (tmp_path / "images").mkdir()
+    (tmp_path / "labels").mkdir()
+    for i in range(3):
+        _picture(tmp_path / "images" / f"{i}.jpg")                    # 320 x 240
+        (tmp_path / "labels" / f"{i}.txt").write_text("0 0.4375 0.5 0.375 0.5\n")
+    data.write_text("path: .\ntrain: images\nval: images\nnames: {0: cup}\n")
+
+    class Fake:
+        def __call__(self, img, conf=None, iou=None):
+            boxes = np.array([[80, 60, 200, 180], [220, 100, 300, 140]], np.float32)
+            scores = np.array([0.6, 0.4], np.float32)
+            keep = scores >= conf
+            return boxes[keep], scores[keep], np.zeros(int(keep.sum()), np.int64)
+
+    monkeypatch.setattr(pibo_export, "_pibo_detector", lambda onnx: Fake())
+    assert 0.4 < pibo_export.pick_conf(tmp_path / "m.onnx", data) <= 0.6
+    assert pibo_export.pick_conf(tmp_path / "m.onnx", None) is None
+    (tmp_path / "noval.yaml").write_text("path: .\ntrain: images\nnames: {0: cup}\n")
+    assert pibo_export.pick_conf(tmp_path / "m.onnx", tmp_path / "noval.yaml") is None
+
+
+def test_detect_py_uses_the_model_s_threshold_and_a_pinned_one_wins(tmp_path):
+    pytest.importorskip("onnxruntime")
+    from easydetect.exporter import export_onnx
+    from easydetect.nn import DFINENet
+
+    net = DFINENet("n", 1, pretrained_backbone=False)
+    onnx = Path(export_onnx(net, {0: "cup"}, imgsz=64, out_dir=tmp_path, fname="model",
+                            verbose=False))
+    detect = _load_detect_py(Path(__file__).resolve().parents[1] / "pibo")
+    assert detect.Detector(str(onnx)).thresholds() == (0.5, 0.7)      # no model.json
+    (tmp_path / "model.json").write_text('{"conf": 0.35}')
+    det = detect.Detector(str(onnx))
+    assert det.thresholds() == (0.35, 0.7)          # the model's own, when the call gives none
+    assert det.thresholds(0.5, 0.4) == (0.5, 0.4)   # a call's own values otherwise
+    det = detect.Detector(str(onnx), conf="auto")
+    assert det.thresholds(0.5, 0.4) == (0.35, 0.4)  # openpibo's 0.5 does not override it
+    det = detect.Detector(str(onnx), conf=0.6, iou=0.5)
+    assert det.thresholds(0.5, 0.4) == (0.6, 0.5)

@@ -33,6 +33,12 @@ rem UTF-8 everywhere: folder names in Hangul (OneDrive\바탕 화면) print and 
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
+rem OneDrive syncs every file as it is written: the database and each epoch's
+rem weights, which slows training and can lock the database mid-run
+echo "%ROOT%" | find /i "OneDrive" >nul && (
+  echo [lab] 주의: 이 폴더는 OneDrive 안에 있어요. 동기화가 학습을 느리게 하고 파일을 잠글 수 있어요.
+  echo [lab]       C:\easydetect-lab 처럼 OneDrive 밖으로 옮겨서 실행하는 걸 권해요.
+)
 echo [lab] 오프라인 묶음으로 시작해요. 인터넷이 없어도 돼요.
 echo [lab] 처음 켤 때는 1~2분 걸릴 수 있어요. 이 창을 닫으면 lab이 꺼져요.
 "%PYEXE%" "%ROOT%\lab\run.py" %*

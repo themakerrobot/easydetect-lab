@@ -61,7 +61,7 @@ def _serve_https(application, uvicorn, args, local: str, path: str) -> None:
 
 #: The oldest easydetect this lab works with. Checked against the code that is
 #: actually imported — an editable install's metadata can lag behind a git pull.
-EASYDETECT_AT_LEAST = "0.7.6"
+EASYDETECT_AT_LEAST = "0.7.7"
 
 
 def _which_easydetect(file: str) -> str:
@@ -96,6 +96,72 @@ def _check_easydetect() -> str:
     return f"easydetect {easydetect.__version__}: {_which_easydetect(easydetect.__file__)}"
 
 
+def _what_answers(host: str, port: int) -> str | None:
+    """``"lab"`` when a lab answers on the port, ``"other"`` when another
+    program holds it, None when it is free."""
+    import json
+    import socket
+    import urllib.request
+
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            pass
+    except OSError:
+        return None
+    try:
+        # the proxy settings are for the internet, not for this machine
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(f"http://{host}:{port}/api/status", timeout=3) as r:
+            return "lab" if "running_job" in json.loads(r.read().decode("utf-8")) else "other"
+    except (OSError, ValueError):
+        return "other"
+
+
+_LOCK = None
+
+
+def _data_dir() -> Path:
+    """The folder app.py settles on."""
+    return Path(os.environ.get("EASYDETECT_LAB_HOME") or os.environ.get("EASYDETECT_PLATFORM_HOME")
+                or Path.cwd() / "easydetect-lab").expanduser()
+
+
+def _single_instance(port: int):
+    """Hold a lock on the data folder for as long as this process lives, so two
+    labs never share one database and worker (the second would reap the first's
+    running job). None when another process holds it; ``.lab.port`` says
+    where that one serves."""
+    global _LOCK
+    if _LOCK is not None:      # this process holds it already
+        return _LOCK
+    data = _data_dir()
+    data.mkdir(parents=True, exist_ok=True)
+    handle = open(data / ".lab.lock", "a+")  # noqa: SIM115 — held until the process ends
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    (data / ".lab.port").write_text(str(port), encoding="utf-8")
+    _LOCK = handle
+    return handle
+
+
+def _held_port(default: int) -> int:
+    try:
+        return int((_data_dir() / ".lab.port").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return default
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("mode", nargs="?", default="serve", choices=("serve", "label"))
@@ -125,12 +191,32 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["EASYDETECT_LAB_HOME"] = str(Path(args.data).expanduser())
 
     print(f"[lab] {_check_easydetect()}")
+    # 0.0.0.0 is where the server listens, not an address a browser can open
+    local = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
+    answer = _what_answers(local, args.port)
+    if answer == "lab" and args.mode == "serve":
+        # a second double-click: open the one that runs instead of starting
+        # another, whose start-up would mark the running job as interrupted
+        print(f"[lab] 이미 켜져 있어요: http://{local}:{args.port}  (already running)")
+        if not args.no_browser:
+            webbrowser.open(f"http://{local}:{args.port}/")
+        return 0
+    if answer is not None:
+        print(f"[lab] {args.port}번 포트를 다른 프로그램이 쓰고 있어요. --port 8081 처럼 "
+              f"다른 번호로 켜 주세요 (port {args.port} is in use)")
+        return 1
+    lock = _single_instance(args.port)
+    if lock is None:
+        port = _held_port(args.port)
+        print(f"[lab] 같은 data 폴더로 lab이 이미 켜져 있어요: http://{local}:{port}  "
+              "(another lab uses this data folder)")
+        if not args.no_browser:
+            webbrowser.open(f"http://{local}:{port}/")
+        return 0
     import uvicorn
 
     import app as application
 
-    # 0.0.0.0 is where the server listens, not an address a browser can open
-    local = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{local}:{args.port}"
     path = "/"
     if args.mode == "label":

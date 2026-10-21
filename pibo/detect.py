@@ -11,6 +11,10 @@ model.onnx and labels.txt sit in this folder beside this file.
     python3 detect.py 0 --show               # ... in a window (needs a screen)
     python3 detect.py 0 --conf 0.6 --every 5 # print every 5th frame only
 
+The score a box needs is the model's own (``conf`` in model.json, picked by
+the lab on the validation pictures), or 0.5 without one; ``--conf`` or a
+``conf=`` argument sets another.
+
 From robot code, in the same folder:
 
     from detect import detect
@@ -28,6 +32,7 @@ Written for Python 3.6 and later, and old numpy / onnxruntime releases.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -44,8 +49,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(HERE, "model.onnx")
 LABELS = os.path.join(HERE, "labels.txt")
 
-#: The lab's defaults: a box needs a score of 0.5, and two boxes overlapping
-#: by more than IoU 0.7 are one object.
+#: The lab's defaults: a box needs a score of 0.5 (unless model.json says what
+#: suits this model), and two boxes overlapping by more than IoU 0.7 are one object.
 CONF = 0.5
 IOU = 0.7
 MAX_DET = 300
@@ -146,12 +151,29 @@ class Detector:
         det = Detector("model.onnx", imgsz=320)
         boxes, scores, classes = det(img, conf=0.5, iou=0.4)
         det.name_of(classes[0])
+
+    ``conf`` / ``iou`` given here hold for every call, whatever the call
+    passes — openpibo always passes its own 0.5 — and ``conf="auto"`` is the
+    model's own (model.json). Left out, a call's value, or the model's own
+    conf when the call gives none.
     """
 
-    def __init__(self, model=MODEL, labels=None, threads=None, imgsz=None):
+    def __init__(self, model=MODEL, labels=None, threads=None, imgsz=None, conf=None,
+                 iou=None):
         # imgsz: accepted for YoloOnnx's signature; the model's own input size is used
+        folder = os.path.dirname(os.path.abspath(model))
         if labels is None:
-            labels = os.path.join(os.path.dirname(os.path.abspath(model)), "labels.txt")
+            labels = os.path.join(folder, "labels.txt")
+        self.model_conf = None
+        try:
+            with open(os.path.join(folder, "model.json"), encoding="utf-8") as f:
+                self.model_conf = float(json.load(f)["conf"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        self.default_conf = self.model_conf if self.model_conf is not None else CONF
+        self.pinned_conf = self.default_conf if conf == "auto" else \
+            float(conf) if conf is not None else None
+        self.pinned_iou = float(iou) if iou is not None else None
         if ort is None:
             raise ImportError("onnxruntime is not installed: pip3 install onnxruntime")
         options = ort.SessionOptions()
@@ -186,14 +208,27 @@ class Detector:
         c = int(cls_id)
         return self.names[c] if 0 <= c < len(self.names) and self.names[c] else str(c)
 
-    def __call__(self, img, conf=CONF, iou=IOU):
+    def thresholds(self, conf=None, iou=None):
+        """The ``(conf, iou)`` a call runs with."""
+        if self.pinned_conf is not None:
+            conf = self.pinned_conf
+        elif conf is None:
+            conf = self.default_conf
+        if self.pinned_iou is not None:
+            iou = self.pinned_iou
+        elif iou is None:
+            iou = IOU
+        return conf, iou
+
+    def __call__(self, img, conf=None, iou=None):
         """``(boxes (N, 4) x1 y1 x2 y2, scores (N,), classes (N,) int)`` for a BGR
         picture, surest first — what openpibo's YoloOnnx returns."""
+        conf, iou = self.thresholds(conf, iou)
         boxes, scores = self.raw(img)
         det = postprocess(boxes, scores, img.shape, conf=conf, iou=iou)
         return det[:, :4], det[:, 4], det[:, 5].astype(np.int64)
 
-    def detect(self, img, conf=CONF, iou=IOU):
+    def detect(self, img, conf=None, iou=None):
         """``[(x1, y1, x2, y2, score, class_name), ...]`` for a BGR picture (or a path),
         surest first, in the picture's own pixels."""
         if isinstance(img, str):
@@ -201,6 +236,7 @@ class Detector:
             img = imread(path)
             if img is None:
                 raise FileNotFoundError(f"cannot read the picture {path}")
+        conf, iou = self.thresholds(conf, iou)
         boxes, scores = self.raw(img)
         det = postprocess(boxes, scores, img.shape, conf=conf, iou=iou)
         out = []
@@ -212,7 +248,7 @@ class Detector:
 _default = None
 
 
-def detect(img, conf=CONF, iou=IOU):
+def detect(img, conf=None, iou=None):
     """``[(x1, y1, x2, y2, score, class_name), ...]`` — model.onnx beside this file,
     loaded on the first call."""
     global _default
@@ -263,7 +299,8 @@ def main(argv=None):
             pass
     parser = argparse.ArgumentParser(description="Detect objects with model.onnx")
     parser.add_argument("source", help="a picture's path, or a camera number (0)")
-    parser.add_argument("--conf", type=float, default=CONF, help="smallest score shown (0.5)")
+    parser.add_argument("--conf", type=float,
+                        help="smallest score shown (default: the model's own, else 0.5)")
     parser.add_argument("--model", default=MODEL, help="the .onnx to run (model.onnx here)")
     parser.add_argument("--labels", default=LABELS, help="class names (labels.txt here)")
     parser.add_argument("--save", help="write the picture with boxes drawn to this file")
@@ -279,9 +316,9 @@ def main(argv=None):
         print("onnxruntime is not installed: pip3 install onnxruntime", file=sys.stderr)
         return 1
     model = Detector(args.model, args.labels, threads=args.threads)
-    print("model {}: input {}x{}, {} classes ({})".format(
+    print("model {}: input {}x{}, {} classes ({}), score from {:.2f}".format(
         os.path.basename(args.model), model.size, model.size, len(model.names),
-        ", ".join(model.names)))
+        ", ".join(model.names), model.thresholds(args.conf)[0]))
 
     if not args.source.isdigit():                       # a picture
         img = imread(args.source)

@@ -45,6 +45,13 @@
     "병합된 데이터셋 이름": "Name for the merged dataset",
     "{0}장을 합쳤어요 · 클래스 {1}": "Merged {0} images · classes {1}",
     "데이터셋 #{0}과 그 작업 기록을 지울까요?": "Delete dataset #{0} and its jobs?",
+    "이 데이터셋으로 학습한 {0}개도 목록에서 사라져요: {1}. ": "The {0} run(s) trained on it leave the list too: {1}. ",
+    "가중치 파일은 runs 폴더에 남아요.": "Their weight files stay in the runs folder.",
+    "서버에 닿지 않아요. lab이 켜져 있는지 확인해 주세요": "Cannot reach the server. Is the lab still running?",
+    "Pibo용 zip을 받았어요": "Downloaded the Pibo zip",
+    "저장하지 못했어요: {0}": "Could not save: {0}",
+    "기다리는 중이에요. #{0} 다음에 앞선 {1}개가 끝나면 시작해요": "Waiting: starts after #{0} and the {1} queued before it",
+    "기다리는 중이에요. 앞선 {0}개가 끝나면 시작해요": "Waiting: starts after the {0} queued before it",
     "이미지를 골라 주세요": "Pick some images", "영상을 골라 주세요": "Pick a video", "zip을 골라 주세요": "Pick a zip",
     "폴더 경로를 적어 주세요": "Enter a folder path", "올리는 중…": "Uploading…", "복제했어요": "Duplicated",
 

@@ -65,9 +65,11 @@ epochs for 300 pictures and up to 100 for a few dozen. Small sets need the
 extra passes — on 92–143 pictures, 100 epochs scored 0.12–0.19 mAP50-95 above
 30 (three seeds each) — and the time on a laptop stays near the same 10–15
 minutes. A class COCO already knows (`apple`, `cup`, `사과`, `컵` …) starts
-from what the COCO weights know of it (easydetect 0.7.5), so it learns from
-far fewer pictures. A finished run's **Send to Pibo** download is a zip with
-`model.onnx`, `labels.txt` and a `detect.py` that runs on a Raspberry Pi with
+from what the COCO weights know of it, so it learns from far fewer pictures
+(the same goes for *auto-label*: a set whose classes are `컵`, `사과` drafts
+with COCO's `cup`, `apple`). A finished run's **Send to Pibo** download is a
+zip with `model.onnx`, `labels.txt`, `model.json` (with the score threshold
+that did best on the run's validation pictures) and a `detect.py` that runs on a Raspberry Pi with
 numpy, OpenCV and onnxruntime alone — about 160 ms a picture for a classroom
 model on a Raspberry Pi 4B. For teachers, in Korean:
 [docs/classroom.md](docs/classroom.md).
@@ -215,8 +217,9 @@ Button names below are the English ones.
    one, otherwise the weights) and it then appears wherever a model is chosen —
    auto-labelling, batch inference, the webcam. A `.pt`, `.onnx` or IR (its
    `.xml` and `.bin` picked together) from elsewhere goes into the same list.
-   Upload only a `.pt` you trust: it is a pickle, and loading it can run any
-   code its author put in it. An `.onnx` or IR holds no code.
+   A `.pt` is read as weights only: one that holds more (a pickle that could
+   run code when loaded) is refused, unless the lab was started with
+   `EASYDETECT_TRUST_CHECKPOINTS=1`. An `.onnx` or IR holds no code.
    *Use it in code* on a finished run gives Python, command-line and "another
    PC" (OpenVINO or ONNX) snippets with this run's paths filled in, ready to copy.
 9. **Share it** — the *Hugging Face* tab builds the folder to upload: the IR, the
@@ -284,7 +287,7 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `POST /api/jobs/{id}/evaluate` | `{conf}` — queue a scoring pass with pictures |
 | `GET /api/jobs/{id}/report` · `/eval/{name}` | the numbers, and the pictures |
 | `GET /api/jobs/{id}/download/{weights,openvino,onnx,results,log,predictions,video}` | |
-| `GET /api/jobs/{id}/download/pibo` | model.onnx (at the run's input size) + labels.txt + a standalone detect.py (numpy, OpenCV, onnxruntime) + README.txt |
+| `GET /api/jobs/{id}/download/pibo` | model.onnx (at the run's input size) + labels.txt + model.json (input size, classes, the score threshold with the best F1 on validation) + a standalone detect.py (numpy, OpenCV, onnxruntime) + README.txt |
 | `GET /api/jobs/{id}/download/huggingface` | `?repo=&folder=&pt=` — the upload folder, zipped, with its README |
 | `GET /api/jobs/{id}/modelcard` | the README.md that bundle would carry, and where it would go |
 | `POST /api/jobs/{id}/predict` | multipart: `image`, `conf` → annotated JPEG |
@@ -323,9 +326,19 @@ Three things keep that to the people you mean:
   `--host 0.0.0.0` answers on every address so other machines can use it —
   do that on a network you trust (a lab LAN, a line PC), never one open to
   the internet.
-* **Trusted checkpoints only.** A `.pt` is a Python pickle: loading one can run
-  whatever code was put in it. Upload (or point the lab at) checkpoints you
-  made or trust; an `.onnx` or OpenVINO IR carries no code.
+* **Checkpoints are read as weights only.** A `.pt` is a Python pickle, and a
+  pickle can carry code that runs when it is loaded. The lab loads `.pt` files
+  with `weights_only=True` (tensors, numbers, strings): one that holds anything
+  else is refused with a message. `EASYDETECT_TRUST_CHECKPOINTS=1` lifts that
+  for files you trust. An `.onnx` or OpenVINO IR carries no code.
+* **Requests from the lab's own pages only.** A page on another website can
+  make your browser send requests to the lab; a change (a POST, a DELETE)
+  that a browser marks as coming from another site is refused, and so is a
+  request under a host name that is not this machine's (DNS rebinding). Open
+  the lab by its IP address, `localhost` or the computer's name; a name of
+  your own in front of it (a reverse proxy) goes in
+  `EASYDETECT_LAB_HOSTS=lab.school.kr`. An upload over 4 GB is refused
+  (`EASYDETECT_LAB_MAX_UPLOAD_MB` changes it).
 * **No arbitrary paths over the API.** A folder to register, a folder to run a
   batch over, or a model given as a file path must be inside the lab's data
   folder, a dataset folder already registered, or a run it made. Start the

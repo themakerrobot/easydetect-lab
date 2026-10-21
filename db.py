@@ -113,6 +113,18 @@ class Database:
             conn.commit()
             return cursor.lastrowid
 
+    def change(self, sql: str, params=()) -> int:
+        """An UPDATE or DELETE; returns how many rows it changed."""
+        with self._lock, self.connect() as conn:
+            cursor = conn.execute(sql, params)
+            conn.commit()
+            return cursor.rowcount
+
+    def claim_job(self, job_id: int) -> bool:
+        """Queued -> running, unless it was cancelled (or claimed) meanwhile."""
+        return self.change("UPDATE jobs SET status = 'running', started = ? "
+                           "WHERE id = ? AND status = 'queued'", (time.time(), job_id)) == 1
+
     def query(self, sql: str, params=()) -> list[dict]:
         with self._lock, self.connect() as conn:
             return [dict(row) for row in conn.execute(sql, params)]

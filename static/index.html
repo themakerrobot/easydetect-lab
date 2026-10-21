@@ -582,6 +582,11 @@ async function refresh() {
     if (keepDs && trainable.some((d) => String(d.id) === keepDs)) $("job-dataset").value = keepDs;
     trainTasks = Object.fromEntries(datasets.map((d) => [String(d.id), d.task]));
     showTrainTask();
+    // 수업용 was picked before this list existed (the first status), or the
+    // set has more labels now: its epochs follow the set on the list
+    if (document.querySelector('#presets button.on')?.dataset.preset === "classroom") {
+      setField("job-epochs", classroomEpochs()); presetHint();
+    }
     $("train-empty").hidden = trainable.length > 0;
     $("train-form").hidden = trainable.length === 0;
     const keep = $("ds-target").value;
@@ -685,6 +690,7 @@ function renderDatasets(datasets) {
   on("delete", removeDataset);
   on("stats", showStats);
   on("duplicate", duplicate);
+  // navigated to, not fetched: a whole dataset can be gigabytes, too much to hold in the page
   on("export", (id) => location.assign(`/api/datasets/${id}/export`));
   on("train", (id) => { show("train"); $("job-dataset").value = String(id); });
   document.querySelectorAll("[data-pick]").forEach((el) => { el.onclick = null; el.onchange = updateMergeButton; });
@@ -820,7 +826,12 @@ $("merge").onclick = async () => {
 };
 
 async function removeDataset(datasetId) {
-  if (!confirm(T`데이터셋 #${datasetId}과 그 작업 기록을 지울까요?`)) return;
+  // the runs trained on it leave the list with it: say which, before it happens
+  const runs = allJobs.filter((j) => j.dataset_id === datasetId && j.kind === "train")
+    .map((j) => `#${j.id}${j.best_map != null ? ` (mAP ${fmt(j.best_map)})` : ""}`);
+  const also = runs.length ? "\n\n" + T`이 데이터셋으로 학습한 ${runs.length}개도 목록에서 사라져요: ${runs.join(", ")}. `
+    + T("가중치 파일은 runs 폴더에 남아요.") : "";
+  if (!confirm(T`데이터셋 #${datasetId}과 그 작업 기록을 지울까요?` + also)) return;
   try {
     await api(`/api/datasets/${datasetId}`, { method: "DELETE" });
     closeDetail();
@@ -1118,9 +1129,13 @@ function render(job) {
   const what = train ? ` · ${T`${job.epochs}에폭`} · ${job.imgsz}px · ${T`배치 ${job.batch}`}${job.freeze ? ` · ${T("백본 고정")}` : ""}` : "";
   $("detail-sub").textContent = `${modelLabel(job.model)} · ${job.dataset || (job.source ? short(job.source) : "")}${what}${took}`;
 
-  const waiting = job.status === "queued"
-    ? (running && running !== job.id ? T`기다리는 중이에요. #${running}이(가) 끝나면 시작해요` : T("곧 시작해요"))
-    : "";
+  // jobs run one at a time, oldest first: the queued ones before this one go first
+  const ahead = allJobs.filter((j) => j.status === "queued" && j.id < job.id).length;
+  const waiting = job.status !== "queued" ? ""
+    : running && running !== job.id
+      ? (ahead ? T`기다리는 중이에요. #${running} 다음에 앞선 ${ahead}개가 끝나면 시작해요`
+               : T`기다리는 중이에요. #${running}이(가) 끝나면 시작해요`)
+      : ahead ? T`기다리는 중이에요. 앞선 ${ahead}개가 끝나면 시작해요` : T("곧 시작해요");
   const { line, log } = jobMessage(job);
   if (job.status === "failed") {
     // one line that says it failed, then what the error was; the log under it
@@ -1476,7 +1491,7 @@ model = Detector(f"{root}/${folder}/${(hub.files.find((f) => f.endsWith(".xml"))
   if (currentJob) renderHub(currentJob, { reload: true });
 }));
 $("hub-readme").onclick = () => { hub.showReadme = !hub.showReadme; if (currentJob) renderHub(currentJob); };
-$("hub-zip").onclick = () => location.assign(`/api/jobs/${current}/download/huggingface?${hubQuery()}`);
+$("hub-zip").onclick = () => saveFrom(`/api/jobs/${current}/download/huggingface?${hubQuery()}`);
 document.querySelectorAll("#code-tabs button").forEach((b) => b.onclick = () => {
   codeTab = b.dataset.code; if (currentJob) renderCode(currentJob);
 });
@@ -1524,12 +1539,38 @@ $("resume").onclick = async () => {
   catch (e) { say("detail-msg", e.message, "err"); }
 };
 
-const download = (kind) => () => { $("downloads").open = false; location.assign(`/api/jobs/${current}/download/${kind}`); };
+// fetched, not navigated to: a refusal ("가중치가 없어요") shows beside the
+// buttons instead of replacing the page with a bare error
+async function saveFrom(url, msg = "detail-msg") {
+  let res;
+  try { res = await fetch(url); }
+  catch (e) { say(msg, T("서버에 닿지 않아요. lab이 켜져 있는지 확인해 주세요"), "err"); return false; }
+  if (!res.ok) {
+    let text = String(res.status);
+    try { const body = await res.json(); text = body.error || body.detail || text; } catch {}
+    say(msg, text, "err");
+    return false;
+  }
+  const disposition = res.headers.get("content-disposition") || "";
+  const star = /filename\*=(?:UTF-8|utf-8)''([^;]+)/.exec(disposition);
+  const plain = /filename="?([^";]+)"?/.exec(disposition);
+  const name = star ? decodeURIComponent(star[1]) : plain ? plain[1] : url.split("/").pop();
+  const link = Object.assign(document.createElement("a"),
+    { href: URL.createObjectURL(await res.blob()), download: name });
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+  return true;
+}
+const download = (kind) => async () => {
+  $("downloads").open = false;
+  if (await saveFrom(`/api/jobs/${current}/download/${kind}`) && kind === "pibo")
+    say("detail-msg", T("Pibo용 zip을 받았어요"), "ok");
+};
 $("dl-weights").onclick = download("weights");
 $("dl-ir").onclick = download("openvino");
 $("dl-onnx").onclick = download("onnx");
 $("dl-pibo").onclick = () => {      // exports model.onnx first: a few seconds
-  say("detail-msg", "Pibo용 zip을 만드는 중이에요. 몇 초 걸려요", "ok");
+  say("detail-msg", T("Pibo용 zip을 만드는 중이에요. 몇 초 걸려요"), "ok");
   download("pibo")();
 };
 $("dl-csv").onclick = download("results");

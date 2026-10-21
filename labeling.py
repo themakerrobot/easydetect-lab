@@ -208,6 +208,29 @@ def flip_pairs(names: list[str]) -> list[int]:
     return [j if out[j] == i else i for i, j in enumerate(out)]
 
 
+def class_lookup(model_names, names: list[str]) -> dict[str, int]:
+    """``{the model's class name: our class index}``, by name: exact (any case)
+    first, then as easydetect matches names when it fine-tunes — plurals and the
+    Korean names of COCO's classes (``컵`` → cup, ``공`` → sports ball)."""
+    model_names = dict(enumerate(model_names)) if isinstance(model_names, list) \
+        else {int(k): str(v) for k, v in (model_names or {}).items()}
+    lookup = {}
+    by_lower = {str(n).lower(): i for i, n in enumerate(names)}
+    for name in model_names.values():
+        if str(name).lower() in by_lower:
+            lookup[name] = by_lower[str(name).lower()]
+    try:
+        from easydetect.class_names import match_classes
+    except ImportError:          # an easydetect before 0.7.5
+        return lookup
+    taken = set(lookup.values())
+    ours = {i: n for i, n in enumerate(names) if i not in taken}
+    for j, i in match_classes({k: v for k, v in model_names.items()
+                               if v not in lookup}, ours).items():
+        lookup[model_names[i]] = j
+    return lookup
+
+
 def predict_boxes(model, image: Path, names: list[str], conf: float = 0.35,
                   kpt_names: list[str] | None = None) -> list[dict]:
     """Run a model over one image and keep the boxes whose class we label.
@@ -220,7 +243,8 @@ def predict_boxes(model, image: Path, names: list[str], conf: float = 0.35,
     with the ones it is unsure of left unlabelled.
     """
     result = model.predict(str(image), conf=conf, verbose=False)[0]
-    lookup = {name.lower(): i for i, name in enumerate(names)}
+    found = {int(c): result.name_of(c) for c in result.boxes.cls}
+    lookup = class_lookup(found, names)
     outlines = result.masks.xy if getattr(result, "masks", None) is not None else None
     points = getattr(result, "keypoints", None)
     order = _keypoint_order(points.names, kpt_names) if points is not None and kpt_names else None
@@ -228,7 +252,7 @@ def predict_boxes(model, image: Path, names: list[str], conf: float = 0.35,
         height, width = result.orig_shape[:2]
     boxes = []
     for i in range(len(result.boxes)):
-        name = result.name_of(result.boxes.cls[i]).lower()
+        name = result.name_of(result.boxes.cls[i])
         if name not in lookup:
             continue
         cx, cy, w, h = result.boxes.xywhn[i]

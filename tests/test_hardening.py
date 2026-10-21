@@ -180,7 +180,7 @@ def test_a_slow_frame_does_not_hold_up_other_requests(studio, monkeypatch):
 
     async def go():
         transport = httpx.ASGITransport(app=module.app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://lab") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             frame = client.post("/api/preview", data={"model": "dfine-s"},
                                 files={"image": ("f.jpg", image_bytes(), "image/jpeg")})
             pending = asyncio.ensure_future(frame)

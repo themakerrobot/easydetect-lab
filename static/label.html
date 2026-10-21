@@ -263,7 +263,7 @@ async function chooseTask(next) {
   if (next === task()) return;
   if (next === "pose") return openKeypointEditor();
   try {
-    if (dirty) await save();
+    await save();
     if (task() === "pose") {
       const plan = await post(`/api/datasets/${DATASET}/task`, { task: next, dry_run: true });
       if (plan.files && !confirm(T`키포인트를 모두 지우고 상자만 남겨요 (라벨 파일 ${plan.files}개).\n되돌릴 수 없어요. 필요하면 먼저 데이터셋을 복제해 두세요.`)) return;
@@ -324,7 +324,7 @@ async function saveKeypoints() {
     if (!names.length) throw new Error(T("키포인트 이름을 하나 이상 적어 주세요"));
     if (new Set(names).size !== names.length) throw new Error(T("같은 이름이 두 번 있어요"));
     const body = { task: "pose", keypoints, skeleton: parseSkeleton($("kpt-skeleton").value, names) };
-    if (dirty) await save();
+    await save();
     const plan = await post(`/api/datasets/${DATASET}/task`, { ...body, dry_run: true });
     const gone = old.filter((_, j) => !keypoints.some((k) => k.was === j)).length;
     if (plan.files && (plan.outlines_dropped || gone)) {
@@ -402,7 +402,7 @@ async function removeClass(i, into) {
   const name = dataset.classes[i];
   const call = (extra) => post(`/api/datasets/${DATASET}/classes/remove`, { index: i, into, ...extra });
   try {
-    if (dirty) await save();
+    await save();
     const plan = await call({ dry_run: true });
     const question = into === null
       ? T`'${name}' 클래스를 지울까요?\n상자 ${plan.removed}개가 함께 지워지고, 뒤 클래스 번호가 하나씩 당겨져요.`
@@ -468,7 +468,7 @@ function renderFiles() {
 }
 
 async function load(i) {
-  if (dirty) await save();
+  await save();
   if (boxes.length) lastBoxes = copy(boxes);
   index = i; selected = -1; history = []; poly = null;
   boxes = (await api(pictureUrl("labels", i))).boxes;
@@ -940,7 +940,7 @@ function samOutline() {
   outline(selected >= 0 ? [boxes[selected]] : boxes.filter((b) => !hasOutline(b)));
 }
 
-function touch() { dirty = true; renderClasses(); renderKeypoints(); draw(); save(); }
+function touch() { dirty = true; renderClasses(); renderKeypoints(); draw(); save().catch(() => {}); }
 
 function copyPrevious() {
   if (!lastBoxes.length) { notify(T("복사할 이전 상자가 없어요")); return; }
@@ -949,17 +949,30 @@ function copyPrevious() {
   selected = -1; touch();
 }
 
-async function save() {
-  if (!dirty) return;
+// One save at a time, in order: two quick edits must not reach the server the
+// other way round (the older one would win). A save that fails leaves the
+// picture unsaved, so the next edit, or moving on, sends it again — and moving
+// on waits for every save before it.
+let saving = Promise.resolve();
+function save() {
+  if (!dirty) return saving;
   dirty = false;
-  try {
-    await api(pictureUrl("labels", index), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ boxes }), keepalive: true });   // outlives a closing tab
-  } catch (e) { notify(e.message, true); throw e; }
-  dataset.files[index].labelled = true;
-  dataset.files[index].boxes = boxes.length;
-  renderFiles();
+  const at = index, body = JSON.stringify({ boxes }), count = boxes.length;
+  saving = saving.catch(() => {}).then(async () => {
+    try {
+      await api(pictureUrl("labels", at), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body, keepalive: true });   // outlives a closing tab
+    } catch (e) {
+      if (at === index) dirty = true;
+      notify(T`저장하지 못했어요: ${e.message}`, true);
+      throw e;
+    }
+    dataset.files[at].labelled = true;
+    dataset.files[at].boxes = count;
+    renderFiles();
+  });
+  return saving;
 }
 
 function undo() {
@@ -1017,6 +1030,7 @@ document.addEventListener("keyup", (e) => {
 $("drop").onclick = async () => {
   if (!confirm(T`${dataset.files[index].name} 을(를) 데이터셋에서 지울까요?`)) return;
   dirty = false;                                   // it is going away; do not save it back
+  await saving.catch(() => {});                    // nor let a save on its way write it again
   await api(pictureUrl("images", index), { method: "DELETE" });
   dataset = await api(`/api/datasets/${DATASET}`);
   if (!dataset.files.length) { location.assign("../"); return; }

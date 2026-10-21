@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def studio(tmp_path, monkeypatch):
     """A lab rooted in a temp folder, with the worker left asleep."""
     monkeypatch.setenv("EASYDETECT_LAB_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("EASYDETECT_LAB_HOSTS", "testserver")   # the test client's Host
     pytest.importorskip("fastapi")
     pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
