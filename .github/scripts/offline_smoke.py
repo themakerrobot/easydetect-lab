@@ -163,8 +163,10 @@ def main() -> int:
         zf.extractall(folder)
     print(f"[smoke] Pibo zip {len(data) / 1e6:.1f} MB: {names}")
     here = folder / f"pibo-job{job}"
-    assert {p.name for p in here.iterdir()} == {"model.onnx", "labels.txt", "detect.py",
-                                                "README.txt"}
+    assert {p.name for p in here.iterdir()} == {"model.onnx", "labels.txt", "model.json",
+                                                "detect.py", "README.txt"}
+    meta = json.loads((here / "model.json").read_text(encoding="utf-8"))
+    assert meta["names"] == ["box", "ball"] and meta["imgsz"] == 160, meta
     out = subprocess.run([sys.executable, "-I", "detect.py", str(SCRATCH / "test.jpg"),
                           "--conf", "0"], cwd=here, capture_output=True, text=True,
                          encoding="utf-8", timeout=300)

@@ -16,6 +16,10 @@ on:
         description: "Also MobileSAM (outlines) and the pose-s keypoint model"
         type: boolean
         default: false
+      release:
+        description: "Attach the zip to this existing release (a tag, v0.7.7); empty: do not"
+        type: string
+        default: ""
   release:
     types: [published]
 
@@ -212,7 +216,8 @@ jobs:
           retention-days: 14
 
       - name: Attach to the release
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.release != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" $env:ZIP --clobber --repo "${{ github.repository }}"
+          TAG: ${{ github.event.release.tag_name || inputs.release }}
+        run: gh release upload "$env:TAG" $env:ZIP --clobber --repo "${{ github.repository }}"
