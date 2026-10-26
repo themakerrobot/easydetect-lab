@@ -1,0 +1,225 @@
+name: offline-bundle
+
+# easydetect-lab-offline-win64.zip: the lab for a classroom laptop with no
+# internet and no NVIDIA GPU. Unzip, double-click start-lab-offline.bat.
+# Inside: CPython 3.11 (the python.org NuGet package: a full, relocatable
+# install where pip works as usual, unlike the embeddable zip), PyTorch CPU,
+# easydetect and the lab's requirements, the lab itself, and easydetect's
+# cache filled with what labelling, training (ed-n / ed-s), exporting
+# and predicting need. The bundle is then unzipped elsewhere and driven
+# through the classroom path with every route to the internet blocked.
+
+on:
+  workflow_dispatch:
+    inputs:
+      extras:
+        description: "Also MobileSAM (outlines) and the pose-s keypoint model"
+        type: boolean
+        default: false
+      release:
+        description: "Attach the zip to this existing release (a tag, v0.7.7); empty: do not"
+        type: string
+        default: ""
+  release:
+    types: [published]
+
+permissions:
+  contents: write          # attach the zip to the release
+
+concurrency:
+  group: offline-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PY_VERSION: "3.11.9"     # the last 3.11 with a binary (NuGet) release
+  NAME: easydetect-lab-offline
+  ZIP: easydetect-lab-offline-win64.zip
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python ${{ env.PY_VERSION }} (NuGet package)
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $root = Join-Path $env:RUNNER_TEMP "build\$env:NAME"
+          New-Item -ItemType Directory -Force $root | Out-Null
+          $pkg = Join-Path $env:RUNNER_TEMP "python.nupkg.zip"
+          Invoke-WebRequest "https://www.nuget.org/api/v2/package/python/$env:PY_VERSION" -OutFile $pkg
+          Expand-Archive $pkg (Join-Path $env:RUNNER_TEMP "python-nuget")
+          Move-Item (Join-Path $env:RUNNER_TEMP "python-nuget\tools") "$root\python"
+          $py = "$root\python\python.exe"
+          & $py -m ensurepip --upgrade
+          & $py -m pip install --upgrade pip --no-warn-script-location
+          & $py -c "import sys; print(sys.version); print(sys.prefix)"
+          "ROOT=$root" >> $env:GITHUB_ENV
+          "PY=$py" >> $env:GITHUB_ENV
+
+      - name: PyTorch (CPU), easydetect and the lab's requirements
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:PIP_NO_CACHE_DIR = "1"
+          & $env:PY -m pip install --no-warn-script-location torch torchvision `
+              --index-url https://download.pytorch.org/whl/cpu
+          & $env:PY -m pip install --no-warn-script-location -r requirements.txt
+          # OpenVINO phones home from its model converter (each export); offline
+          # that is a wait for nothing. It falls back to a stub without this package.
+          & $env:PY -m pip uninstall -y openvino-telemetry
+          & $env:PY -m pip list
+          & $env:PY -c "import torch, torchvision, easydetect, fastapi, uvicorn, openvino, onnxruntime, cv2, scipy, onnx; print('torch', torch.__version__, 'cuda', torch.cuda.is_available()); print('easydetect', easydetect.__version__)"
+
+      - name: The Visual C++ runtime beside python.exe
+        # torch's DLLs need it; a PC without the Visual C++ Redistributable
+        # would fail on "import torch" (WinError 126). Microsoft allows these
+        # files to be shipped next to the program that uses them.
+        run: |
+          $dlls = "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll",
+                  "msvcp140_codecvt_ids.dll", "vcruntime140.dll", "vcruntime140_1.dll",
+                  "concrt140.dll", "vcomp140.dll"
+          foreach ($d in $dlls) {
+            $src = Join-Path $env:WINDIR "System32\$d"
+            $dst = Join-Path $env:ROOT "python\$d"
+            if ((Test-Path $src) -and -not (Test-Path $dst)) { Copy-Item $src $dst; "copied $d" }
+          }
+
+      - name: The lab
+        run: |
+          $lab = Join-Path $env:ROOT "lab"
+          New-Item -ItemType Directory -Force $lab | Out-Null
+          $skip = '^(tests/|\.github/|offline/|\.git|start-lab\.bat$|PLAN\.md$|pyproject\.toml$)'
+          foreach ($f in (git ls-files)) {
+            if ($f -match $skip) { continue }
+            $dst = Join-Path $lab $f
+            New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
+            Copy-Item $f $dst
+          }
+          Copy-Item offline\start-lab-offline.bat (Join-Path $env:ROOT "start-lab-offline.bat")
+          Get-ChildItem -Recurse $lab | Select-Object -ExpandProperty FullName
+
+      - name: easydetect's cache - everything the classroom path downloads
+        env:
+          EXTRAS: ${{ inputs.extras && '1' || '0' }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:EASYDETECT_HOME = Join-Path $env:ROOT "easydetect-cache"
+          $script = @'
+          import os
+          from easydetect import downloads as d
+          from easydetect.nn import EDNet
+
+          for name in ("ed-n", "ed-s"):
+              d.download_checkpoint(name)   # training starts here (COCO weights)
+              # 수업용 (320 px, 100 queries) starts from the 320 fine-tune
+              assert d.download_sized_checkpoint(name, 320, 100), f"{name}-320.pt not on the mirror"
+              d.download_ir(name)           # predicting with the COCO model; labels.txt
+              d.download_onnx(name)         # the same without OpenVINO
+          # the ImageNet backbones training falls back to without a checkpoint
+          for variant in ("n", "s"):
+              assert EDNet(variant, 2).backbone.imagenet_loaded, variant
+          if os.environ.get("EXTRAS") == "1":
+              d.download_segmenter()        # outlines (MobileSAM)
+              d.download_sam_decoder()      # training on outlines
+              d.download_pose("s")          # keypoints
+          root = d.cache_dir()
+          for f in sorted(root.rglob("*")):
+              if f.is_file():
+                  print(f"{f.stat().st_size / 1e6:8.1f} MB  {f.relative_to(root)}")
+          '@
+          $script | & $env:PY -
+          # the cache must hold files only: nothing that names the build machine
+          Get-ChildItem -Recurse $env:EASYDETECT_HOME -Filter *.part | Remove-Item
+
+      - name: Trim what never runs offline
+        run: |
+          $sp = Join-Path $env:ROOT "python\Lib\site-packages"
+          # C++ headers and import libraries are for building extensions, not running
+          Remove-Item -Recurse -Force "$sp\torch\include" -ErrorAction SilentlyContinue
+          Get-ChildItem "$sp\torch\lib" -Filter *.lib | Remove-Item
+          Remove-Item -Recurse -Force (Join-Path $env:ROOT "python\Lib\test") -ErrorAction SilentlyContinue
+          Get-ChildItem -Recurse -Directory -Filter __pycache__ (Join-Path $env:ROOT "lab") |
+            Remove-Item -Recurse -Force
+
+      - name: Zip it
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Push-Location (Split-Path $env:ROOT)
+          7z a -tzip -mx=5 -bso0 -bsp0 (Join-Path $env:GITHUB_WORKSPACE $env:ZIP) $env:NAME
+          Pop-Location
+          function Size($p) { "{0,8:N0} MB" -f ((Get-ChildItem -Recurse -File $p | Measure-Object Length -Sum).Sum / 1MB) }
+          $sp = Join-Path $env:ROOT "python\Lib\site-packages"
+          $report = @(
+            "zip:              " + ("{0,8:N0} MB" -f ((Get-Item $env:ZIP).Length / 1MB)),
+            "unzipped:         " + (Size $env:ROOT),
+            "  python + pkgs:  " + (Size (Join-Path $env:ROOT "python")),
+            "    torch:        " + (Size "$sp\torch"),
+            "    openvino:     " + (Size "$sp\openvino"),
+            "    onnxruntime:  " + (Size "$sp\onnxruntime"),
+            "    cv2:          " + (Size "$sp\cv2"),
+            "  weights cache:  " + (Size (Join-Path $env:ROOT "easydetect-cache")),
+            "  lab:            " + (Size (Join-Path $env:ROOT "lab"))
+          )
+          $report | Write-Output
+          "## Offline bundle size`n``````n$($report -join "`n")`n``````" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Test the bundle offline - unzipped somewhere new, the network blocked
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          # a space and Hangul, as on a Korean Windows desktop (OneDrive\바탕 화면): OpenCV
+          # alone cannot open such a path, so training, predicting and the Pibo zip all run here
+          $where = Join-Path $env:RUNNER_TEMP "바탕 화면"
+          7z x -bso0 -bsp0 $env:ZIP "-o$where"
+          $bundle = Join-Path $where $env:NAME
+          $py = Join-Path $bundle "python\python.exe"
+          # every route out closed: the weights mirror, Hugging Face, and any
+          # HTTP(S) client that honours a proxy (urllib does)
+          $env:EASYDETECT_ASSETS_URL = "http://127.0.0.1:9"
+          $env:HF_HUB_OFFLINE = "1"
+          $env:HTTP_PROXY = "http://127.0.0.1:9"
+          $env:HTTPS_PROXY = "http://127.0.0.1:9"
+          $env:NO_PROXY = "127.0.0.1,localhost"
+          Remove-Item Env:EASYDETECT_HOME -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath cmd.exe -PassThru -NoNewWindow -WorkingDirectory $bundle `
+            -ArgumentList '/c', 'start-lab-offline.bat', '--no-browser', '--https-port', '0' `
+            -RedirectStandardOutput lab.log -RedirectStandardError lab.err
+          try {
+            & $py -X utf8 .github\scripts\offline_smoke.py http://127.0.0.1:8080 (Join-Path $env:RUNNER_TEMP "smoke")
+          } finally {
+            Get-Content lab.log, lab.err -ErrorAction SilentlyContinue | Select-Object -Last 60
+            taskkill /F /T /PID $p.Id | Out-Null
+          }
+          if (-not (Test-Path (Join-Path $bundle "data\lab.db"))) {
+            Write-Error "the lab did not keep its data inside the bundle (data\lab.db)"; exit 1 }
+          # what training and exporting added to the cache: compiled models only, no downloads
+          Get-ChildItem -Recurse -File (Join-Path $bundle "easydetect-cache") |
+            Where-Object LastWriteTime -gt $p.StartTime |
+            ForEach-Object { "written while offline: $($_.FullName.Substring($bundle.Length))" }
+
+      - name: Python and torch from a folder with Hangul in its name
+        # a student's Downloads folder is often C:\Users\<한글 이름>\...
+        continue-on-error: true
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $where = Join-Path $env:RUNNER_TEMP "수업 폴더"
+          7z x -bso0 -bsp0 $env:ZIP "-o$where"
+          $py = Join-Path $where "$env:NAME\python\python.exe"
+          & $py -X utf8 -c "import torch, openvino, onnxruntime, easydetect; print('torch', torch.__version__, torch.ones(2).sum().item(), 'from', torch.__file__)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP }}
+          path: ${{ env.ZIP }}
+          compression-level: 0     # it is a zip already
+          retention-days: 14
+
+      - name: Attach to the release
+        if: github.event_name == 'release' || inputs.release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.release }}
+        run: gh release upload "$env:TAG" $env:ZIP --clobber --repo "${{ github.repository }}"

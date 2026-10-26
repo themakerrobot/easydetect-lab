@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+# Apache-2.0
+"""Start the lab.
+
+    python run.py                                            # the web app
+    python run.py --host 0.0.0.0                             # ... other machines too
+    python run.py label --source images/ --names can,bottle
+
+The second form registers a folder already on this machine and opens the
+labelling page on it — the quick path when all you want is to draw boxes.
+
+Only this machine can open the lab unless ``--host 0.0.0.0`` says otherwise:
+it has no login, and whoever reaches the port can upload a ``.pt`` (a pickle,
+which runs code when loaded) and start jobs on this machine.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import threading
+import webbrowser
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+# a path with Hangul in it must never stop the lab just because the console
+# (or a log it is redirected to) cannot show those characters
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+sys.path.insert(0, str(HERE))  # the app's own modules, without shadowing stdlib
+
+
+def _serve_https(application, uvicorn, args, local: str, path: str) -> None:
+    """The same app over HTTPS, beside the HTTP one, for the webcam.
+
+    Runs in a thread: uvicorn only takes over signals on the main thread, so
+    Ctrl+C still stops the process through the HTTP server.
+    """
+    from tls import ensure_certificate
+
+    try:
+        cert, key = ensure_certificate(application.DATA / "tls")
+    except Exception as exc:  # no or broken cryptography: HTTP still works
+        print(f"[lab] HTTPS off ({type(exc).__name__}: {exc}); "
+              f"pip install -U cryptography serves it — the webcam needs it")
+        return
+    os.environ["EASYDETECT_HTTPS_PORT"] = str(args.https_port)
+    config = uvicorn.Config(
+        application.app, host=args.host, port=args.https_port, log_level="warning",
+        ssl_certfile=str(cert), ssl_keyfile=str(key),
+    )
+    threading.Thread(target=uvicorn.Server(config).run, daemon=True, name="https").start()
+    print(f"[lab] https://{local}:{args.https_port}{path}  (for the webcam; "
+          f"the browser warns once about the certificate)")
+
+
+#: The oldest easydetect this lab works with. Checked against the code that is
+#: actually imported — an editable install's metadata can lag behind a git pull.
+EASYDETECT_AT_LEAST = "0.7.9"
+
+
+def _which_easydetect(file: str) -> str:
+    """Say which easydetect a path belongs to: an installed package, or a source tree.
+
+    The lab runs on whatever easydetect pip installed, normally the PyPI
+    release. An editable install (``pip install -e`` in a clone of easydetect)
+    or a PYTHONPATH points it at that clone's code instead, released or not;
+    this line makes the difference visible.
+    """
+    where = Path(file).resolve().parent
+    if {"site-packages", "dist-packages"} & set(where.parts):
+        return f"installed package at {where}"
+    return f"editable install, the source at {where}"
+
+
+def _check_easydetect() -> str:
+    try:
+        import easydetect
+    except ImportError:
+        raise SystemExit('easydetect is not installed: pip install -r requirements.txt '
+                         '(or pip install "easydetect[train]")') from None
+    have = tuple(int(x) for x in easydetect.__version__.split(".")[:3])
+    need = tuple(int(x) for x in EASYDETECT_AT_LEAST.split("."))
+    if have < need:
+        raise SystemExit(
+            f"the lab needs easydetect >= {EASYDETECT_AT_LEAST}, "
+            f"found {easydetect.__version__} at "
+            f"{Path(easydetect.__file__).parent}.\n"
+            f'  pip install -U "easydetect[train]"      # or, in a clone: pip install -e ".[train]"'
+        )
+    return f"easydetect {easydetect.__version__}: {_which_easydetect(easydetect.__file__)}"
+
+
+def _what_answers(host: str, port: int) -> str | None:
+    """``"lab"`` when a lab answers on the port, ``"other"`` when another
+    program holds it, None when it is free."""
+    import json
+    import socket
+    import urllib.request
+
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            pass
+    except OSError:
+        return None
+    try:
+        # the proxy settings are for the internet, not for this machine
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(f"http://{host}:{port}/api/status", timeout=3) as r:
+            return "lab" if "running_job" in json.loads(r.read().decode("utf-8")) else "other"
+    except (OSError, ValueError):
+        return "other"
+
+
+_LOCK = None
+
+
+def _data_dir() -> Path:
+    """The folder app.py settles on."""
+    return Path(os.environ.get("EASYDETECT_LAB_HOME") or os.environ.get("EASYDETECT_PLATFORM_HOME")
+                or Path.cwd() / "easydetect-lab").expanduser()
+
+
+def _single_instance(port: int):
+    """Hold a lock on the data folder for as long as this process lives, so two
+    labs never share one database and worker (the second would reap the first's
+    running job). None when another process holds it; ``.lab.port`` says
+    where that one serves."""
+    global _LOCK
+    if _LOCK is not None:      # this process holds it already
+        return _LOCK
+    data = _data_dir()
+    data.mkdir(parents=True, exist_ok=True)
+    handle = open(data / ".lab.lock", "a+")  # noqa: SIM115 — held until the process ends
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    (data / ".lab.port").write_text(str(port), encoding="utf-8")
+    _LOCK = handle
+    return handle
+
+
+def _held_port(default: int) -> int:
+    try:
+        return int((_data_dir() / ".lab.port").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return default
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("mode", nargs="?", default="serve", choices=("serve", "label"))
+    parser.add_argument("--source", help="label mode: folder of images to open")
+    parser.add_argument("--names", help="label mode: comma-separated class names")
+    parser.add_argument(
+        "--host", default="127.0.0.1",
+        help="127.0.0.1 (default) keeps it to this machine; 0.0.0.0 answers on every "
+             "address, so other machines can open it — with no login, so only on a "
+             "network you trust",
+    )
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument(
+        "--https-port", type=int, default=8443,
+        help="also serve HTTPS here, which the webcam needs from other machines; 0: off",
+    )
+    parser.add_argument("--data", help="where datasets, runs and the database live")
+    parser.add_argument("--no-browser", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.data:
+        os.environ["EASYDETECT_LAB_HOME"] = str(Path(args.data).expanduser())
+
+    print(f"[lab] {_check_easydetect()}")
+    # 0.0.0.0 is where the server listens, not an address a browser can open
+    local = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
+    answer = _what_answers(local, args.port)
+    if answer == "lab" and args.mode == "serve":
+        # a second double-click: open the one that runs instead of starting
+        # another, whose start-up would mark the running job as interrupted
+        print(f"[lab] 이미 켜져 있어요: http://{local}:{args.port}  (already running)")
+        if not args.no_browser:
+            webbrowser.open(f"http://{local}:{args.port}/")
+        return 0
+    if answer == "lab":
+        # label mode registers the folder in this process; a lab that already
+        # runs on the port owns the database, so it is done from its page
+        print(f"[lab] lab이 이미 켜져 있어요: http://{local}:{args.port}\n"
+              "[lab] 그 lab의 데이터셋 화면에서 '폴더'로 등록하거나, 켜진 lab을 끄고 다시 "
+              "실행하세요 (already running: register the folder from its page)")
+        if not args.no_browser:
+            webbrowser.open(f"http://{local}:{args.port}/")
+        return 0
+    if answer is not None:
+        print(f"[lab] {args.port}번 포트를 다른 프로그램이 쓰고 있어요. --port 8081 처럼 "
+              f"다른 번호로 켜 주세요 (port {args.port} is in use)")
+        return 1
+    lock = _single_instance(args.port)
+    if lock is None:
+        port = _held_port(args.port)
+        print(f"[lab] 같은 data 폴더로 lab이 이미 켜져 있어요: http://{local}:{port}  "
+              "(another lab uses this data folder)")
+        if not args.no_browser:
+            webbrowser.open(f"http://{local}:{port}/")
+        return 0
+    import uvicorn
+
+    import app as application
+
+    url = f"http://{local}:{args.port}"
+    path = "/"
+    if args.mode == "label":
+        if not args.source:
+            parser.error("label mode needs --source")
+        application._start()  # so the folders and the worker exist before we register
+        # typed at this machine, so any folder: the API's path rule is for the network
+        dataset = application.register_folder(
+            {
+                "path": args.source,
+                "name": Path(args.source).resolve().name,
+                "names": [n.strip() for n in (args.names or "").split(",") if n.strip()] or None,
+            }
+        )
+        path = f"/label/{dataset['id']}"
+        print(f"[lab] {dataset['images']} images, {dataset['labelled']} already labelled")
+
+    where = "  (other machines: this one's IP)" if local != args.host else ""
+    print(f"[lab] {url}{path}{where}")
+    if args.host in ("127.0.0.1", "localhost", "::1"):
+        print("[lab] only this machine can open it; --host 0.0.0.0 lets others in "
+              "(no login: anyone on the network could use it)")
+    else:
+        print("[lab] open to the network with no login — anyone who reaches this port can "
+              "upload models and start jobs here")
+    if args.https_port:
+        _serve_https(application, uvicorn, args, local, path)
+    if not args.no_browser:
+        threading.Thread(target=lambda: webbrowser.open(url + path), daemon=True).start()
+    uvicorn.run(application.app, host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

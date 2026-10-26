@@ -1,0 +1,404 @@
+# easydetect lab
+
+Label images, train on them, watch the run, take the model away — in a browser,
+on one machine. It runs on [easydetect](https://github.com/themakerrobot/easydetect),
+the detection package, installed from PyPI; this repository is only the app.
+
+```bash
+git clone https://github.com/themakerrobot/easydetect-lab
+cd easydetect-lab
+pip install -r requirements.txt   # easydetect[train] from PyPI, and the web server
+python run.py                     # http://127.0.0.1:8080, this machine only
+python run.py --host 0.0.0.0      # http://<this machine>:8080 from other machines too
+```
+
+The lab has no login. `--host 0.0.0.0` lets anyone who can reach the port use
+it — upload models, read the folders it knows, start jobs — so open it only on
+a network you trust (see [Security](#security)).
+
+`pip install "easydetect[train]"` alone does not bring the web server
+(FastAPI, uvicorn); `requirements.txt` adds it. Lab changes arrive with
+`git pull`, package changes with `pip install -U "easydetect[train]"`. The
+first line `run.py` prints says which easydetect it found:
+
+```
+[lab] easydetect 0.2.1: installed package at .../site-packages/easydetect
+```
+
+`editable install` there means a `pip install -e` of an easydetect clone: the
+lab then runs on that clone's code, released or not — what you want while
+changing the package, and only then. `pip uninstall easydetect` and
+`pip install -r requirements.txt` go back to the release.
+
+### Windows: double-click
+
+`start-lab.bat` in this folder starts the lab and opens the browser. The first
+time it makes a `.venv` folder beside it and installs everything into it (a few
+minutes; it needs [Python](https://www.python.org/downloads/) 3.10 to 3.13 —
+3.12 is safest, and the newest release often has no onnxruntime or PyTorch yet
+— installed with *Add python.exe to PATH*; with several installed it picks
+3.12 first); after a `git pull` that changes
+`requirements.txt` it installs again. Closing the window stops the lab.
+It opens the lab to this PC only; `start-lab.bat --host 0.0.0.0` lets other
+machines in (Windows then asks once whether Python may use the network).
+
+PyTorch from PyPI is the CPU build on Windows. On a PC with an NVIDIA GPU,
+install the CUDA build into that folder once:
+
+```bat
+.venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+```
+
+To use a Python you already have (a conda env, say) instead of `.venv`,
+`set LAB_PYTHON=C:\path\to\python.exe` before running it.
+
+### A classroom with no internet: the offline zip
+
+`easydetect-lab-offline-win64.zip` (attached to each
+[release](https://github.com/themakerrobot/easydetect-lab/releases), built by
+`.github/workflows/offline-bundle.yml`) holds Python 3.11, PyTorch for the
+CPU, easydetect, the lab and the weights training starts from. Unzip it and
+double-click `start-lab-offline.bat`: nothing is installed and nothing is
+downloaded. Without a CUDA GPU the training form starts on the **Classroom
+(CPU)** goal — ed-n at 320 px, 100 queries and 30 denoising queries
+(`train(queries=, denoising=)`, about twice as fast a step on a CPU), the
+backbone frozen, and epochs set from the dataset: about 1,000 steps, so 35
+epochs for 300 pictures and up to 100 for a few dozen. Small sets need the
+extra passes — on 92–143 pictures, 100 epochs scored 0.12–0.19 mAP50-95 above
+30 (three seeds each) — and the time on a laptop stays near the same 10–15
+minutes. A class COCO already knows (`apple`, `cup`, `사과`, `컵` …) starts
+from what the COCO weights know of it, so it learns from far fewer pictures
+(the same goes for *auto-label*: a set whose classes are `컵`, `사과` drafts
+with COCO's `cup`, `apple`). A finished run's **Send to Pibo** download is one
+`.onnx` file with the class names and the score threshold that did best on the
+run's validation pictures inside it; the robot loads it in place of its COCO
+model, and `pibo/detect.py` runs it on any Raspberry Pi with numpy, OpenCV and
+onnxruntime alone — about 160 ms a picture for a classroom model on a
+Raspberry Pi 4B. For teachers, in Korean:
+[docs/classroom.md](docs/classroom.md).
+
+![the lab](docs/lab.jpg)
+
+[PLAN.md](PLAN.md) is what this is meant to become, and what is missing today.
+
+The screens follow [themaker-ui](https://github.com/themakerrobot/themaker-ui),
+the design kit shared by themakerrobot's education tools: its stylesheet and the
+Pretendard font are copied unchanged into `static/css/` and `static/assets/`
+(CI checks the copy against the kit's v1.0.0 tag), and what is particular to
+this app sits in `static/css/app.css`. The **EN / 한** button at the top right
+switches between Korean and English; the choice is remembered in the browser,
+and a first visit follows the browser's language. Strings live in
+`static/js/i18n.js` — Korean is the source, with an English entry for each.
+Button names below are the English ones.
+
+## The loop
+
+1. **Collect** — four ways into a dataset, and all of them can add to one that
+   already exists: pick image files, upload a video and sample frames from it
+   (interval and cap are yours), upload a zip, or register a folder already on
+   this machine (`python run.py label --source photos/ --names can,bottle`).
+   From the page, a folder outside the lab's own is refused unless the server
+   was started with `EASYDETECT_LAB_ALLOW_PATHS` (see [Security](#security));
+   `run.py label --source` takes any folder.
+   A YOLO-format export from a labelling service goes in as the zip it
+   downloaded as — Roboflow's *YOLOv8* / *YOLOv11* TXT, say — with its classes,
+   labels and train/valid split kept; *Statistics* and *Draw boxes* show it straight away.
+   Labels are stored where training reads them: in `labels/` beside an
+   `images/` folder, otherwise next to each picture, inside the folder.
+2. **Label** — *Draw boxes* on the dataset card. Drag to draw, drag inside a box to
+   move it, drag a corner to resize, <kbd>1</kbd>–<kbd>9</kbd> to set the class,
+   <kbd>Del</kbd> to remove, <kbd>Ctrl</kbd>+<kbd>Z</kbd> to undo. Saving is
+   automatic. The wheel zooms and the middle button (or <kbd>Space</kbd>) pans,
+   for boxes too small to place at fit-to-window. <kbd>C</kbd> copies the
+   previous image's boxes — a fixed camera repeats itself. Classes can be added
+   from the sidebar and show how many boxes each has; ⋯ beside one renames it,
+   merges it into another class (its boxes move there) or deletes it with its
+   boxes. Label files store classes by number, so a merge or delete rewrites
+   every label file and moves the classes after it down one; it says how many
+   boxes it touches before it does, and waits while a run uses the dataset.
+   The file list can hide
+   what is already labelled. A dataset spread over folders (`train/images`,
+   `valid/images`, …) can be browsed one folder at a time, and ←/→ stay in it;
+   background frames — a label with no boxes — are marked apart from pictures
+   that have boxes.
+
+   **Outlines and keypoints.** *What to label* at the top of the sidebar picks
+   boxes, outlines (segmentation) or keypoints (pose); the label files are
+   Ultralytics' formats, so an export trains in either tool.
+   - *Outlines*: draw a box and AI (MobileSAM, 44 MB once) traces the object's
+     outline, or <kbd>P</kbd> to click one point by point (the first point or
+     <kbd>Enter</kbd> closes it). Drag a point to move it, double-click an
+     edge to add one, right-click a point to remove it; <kbd>S</kbd> traces
+     the selected box, or every box still without an outline. Once the
+     dataset has a trained run, its own fine-tuned decoder traces instead.
+   - *Keypoints*: name the points once (one a line, with the lines that join
+     them; *COCO people, 17 points* fills in COCO's body), then draw a box and
+     click its points in order — the next one to place is shown by the
+     pointer and highlighted in the sidebar. <kbd>Shift</kbd>+click places a
+     hidden point, <kbd>Tab</kbd> skips to the next, right-click turns a point
+     hidden and then removes it. Renaming, reordering, adding or removing
+     keypoints later carries every label file's points along. Names that pair
+     left and right (`left_`/`right_`, `l_`/`r_`, 왼/오른) swap when training
+     flips a picture.
+3. **Keep the set honest** — *Statistics* counts boxes per class and flags what usually
+   bites: images with no label, labels with no boxes, specks under 0.1% of the
+   frame — and boxes still without an outline or without keypoints, with a
+   count for each keypoint. *Duplicate* takes a snapshot before a risky relabel, *Merge selected* combines sets and
+   remaps class indices by name (index 0 rarely means the same thing in two
+   datasets), and an image can be dropped with its label from the labelling page.
+4. **Let the model do the first pass** — *Auto-label* fills the current image;
+   *Auto-label all* queues a job over every unlabelled image in the dataset.
+   Correcting boxes is far quicker than drawing them, and once you have a
+   `best.pt` you can point the auto-labeller at it. On an outline dataset the
+   drafts come with outlines; on a keypoint dataset with the keypoints a model
+   knows by name — a run trained on the dataset, or COCO's people.
+5. **Train** — a goal (빠르게 / 균형 / 정확하게) or your own model, epochs,
+   batch, backbone freezing, "stop when it stops improving" (patience) and
+   zoom/crop augmentation; image size and device under 고급 설정, and there
+   too the optimizer: learning rate, the backbone's share of it, warmup epochs,
+   weight decay, seed and mixed precision. Left empty, easydetect decides —
+   the learning rate from the batch size (`1e-4 × √(batch / 4)`, shown under
+   the field as you change the batch), so a bigger batch does not quietly
+   learn less. A goal fills
+   only the fields you have not changed yourself. The header shows each NVIDIA GPU live —
+   utilisation, memory, temperature, power, read from `nvidia-smi` every two
+   seconds — and warns when the driver sees a GPU that PyTorch cannot use (a CPU
+   build of torch), since training would then run on the CPU. On a GPU the
+   presets batch four times larger. Jobs queue and run one
+   at a time; inside an epoch the job shows its batch, what is left and when it
+   is validating, and the loss and mAP curve updates per epoch; images are
+   decoded by loader processes (half the cores, at most eight —
+   `EASYDETECT_WORKERS` overrides); *Stop* stops within a batch;
+   *Train more* continues a finished run with more epochs in the same directory;
+   every run keeps a `train.log`, and a failure carries the end of it.
+   *Delete* removes a finished job with its weights, IR and log, and the runs
+   continued from it and the evaluations of it; it is refused while any of them
+   runs, or while a registered model uses those files. A run cut short — stopped,
+   crashed or interrupted by a restart — keeps its best epoch for evaluating,
+   downloading and registering.
+   *Run details* on the job shows what the run was set up with from its first
+   batch — starting weights, train/validation images and boxes per class,
+   trainable parameters, optimizer and schedule, augmentation, device, versions
+   — and, once it ends, the best epoch, time per epoch and final losses. The
+   trainer writes this to `run.json` in the run folder (`summary.json` repeats
+   it with the outcome), so it is there for scripts too.
+6. **See what it learned** — *Evaluate* scores the run on its validation split and
+   draws every one of those frames with the truth in green and the prediction in
+   its class colour, next to per-class AP. A single mAP says whether to keep
+   going; this says what to fix.
+7. **Run it on everything else** — the confidence slider starts at 0.5, where
+   ed's boxes are mostly right (70% on COCO val2017, against 32% at YOLO's
+   usual 0.25; the table is in easydetect's docs/performance.md). Under it, *IoU* sets how
+   much two boxes may overlap before only the better one stays (1 turns it
+   off), and *Merge pieces of one object* folds the pieces of a half hidden
+   object into its whole (easydetect's `contain=0.8`; off by default — on COCO it
+   removes more real objects than it fixes); both apply to the
+   webcam, a single picture and batch runs alike. *Outline objects* paints a
+   mask over each box on the webcam and in batch runs (easydetect's
+   `task="segment"`: MobileSAM outlines what the box holds, so a model trained
+   on boxes alone gets masks). It downloads 44 MB the first time and adds
+   about 150 ms a frame plus 25 ms a box on a CPU.
+   *Predict* takes a dataset, a folder path on this
+   machine, or an uploaded video, and queues it like a training job. While it
+   works the job says how far it is ("이미지 54/300 · 상자 5개 · 남은 시간 약
+   43초") and shows frames as they are drawn; when done, the boxes per class and
+   the first 60 drawn frames are right there, with a zip of all of them (and
+   `results.json`) and, for a video, `annotated.mp4` to download. The model
+   picker lists your finished runs first — no need to register one to use it —
+   and auto-labelling drafts with the dataset's own latest run when it has one. *Webcam* opens the browser's camera and
+   posts a frame every 400 ms, so you see the model on live video even when the
+   server is somewhere else.
+8. **Take it away** — `best.pt`, the OpenVINO IR as a zip and the ONNX as a
+   zip (both exported when a run finishes, each with `labels.txt`),
+   `results.csv`. *Also make INT8* under the training form's advanced settings
+   adds `best_int8.xml` beside the IR, in the same zip: quantized on pictures
+   from the training split, about twice as fast on a CPU without bfloat16, but
+   check its accuracy before you rely on it — it is off by default (and needs
+   `pip install nncf`). The IR is for OpenVINO (Intel CPU, GPU, NPU); the ONNX runs on
+   ONNX Runtime on any CPU, a Raspberry Pi included
+   (`Detector("best.onnx", backend="onnxruntime")`), with the same boxes. *Register model* gives the run a name (the IR if it has
+   one, otherwise the weights) and it then appears wherever a model is chosen —
+   auto-labelling, batch inference, the webcam. A `.pt`, `.onnx` or IR (its
+   `.xml` and `.bin` picked together) from elsewhere goes into the same list.
+   A `.pt` is read as weights only: one that holds more (a pickle that could
+   run code when loaded) is refused, unless the lab was started with
+   `EASYDETECT_TRUST_CHECKPOINTS=1`. An `.onnx` or IR holds no code.
+   *Use it in code* on a finished run gives Python, command-line and "another
+   PC" (OpenVINO or ONNX) snippets with this run's paths filled in, ready to copy.
+9. **Share it** — the *Hugging Face* tab builds the folder to upload: the IR, the
+   ONNX, `labels.txt`, optionally `best.pt`, and a `README.md` model card written
+   from the run itself — classes with their train/val box counts (and AP if
+   you evaluated), mAP, backbone, starting weights, the training settings and
+   hardware, and download-and-run code pointing at the repo and folder you
+   chose (by default the repo your weights come from, `models/<dataset>`).
+   It shows the `hf upload` command to run next. The IR and ONNX zips carry the
+   same card, written for the runtime inside.
+
+![labelling](docs/labeling.jpg)
+
+## Where things live
+
+Everything sits under `easydetect-lab/` in the directory you start from —
+`--data /some/path` or `$EASYDETECT_LAB_HOME` moves it:
+
+```
+easydetect-lab/
+  lab.db               datasets, jobs, per-epoch numbers
+  datasets/<name>/     uploaded datasets (registered folders stay where they are)
+  runs/job<id>/        weights/, openvino/, results.csv, summary.json
+                       (inference jobs: images/, results.json, annotated.mp4)
+  models/<name>/       models uploaded from outside
+```
+
+## API
+
+The pages are only clients of these, so a script can do anything the UI does:
+
+| endpoint | |
+| --- | --- |
+| `POST /api/datasets` | multipart: `name`, `archive` (zip) |
+| `POST /api/datasets/images` | multipart: `name`, `files` (images), optional `dataset_id` |
+| `POST /api/datasets/video` | multipart: `name`, `video`, `every`, `max_frames` |
+| `GET /api/datasets/{id}/export` | the dataset as a zip |
+| `GET /api/datasets/{id}/stats` | boxes per class, and what looks wrong |
+| `DELETE /api/datasets/{id}/images/{index}` | drop one image and its label |
+| `POST /api/datasets/{id}/duplicate` | a copy to experiment on |
+| `POST /api/datasets/merge` | `{ids, name}` — one set, class indices remapped |
+| `DELETE /api/datasets/{id}` | |
+| `POST /api/datasets/local` | `{path, name, names}` — register a folder in place (inside the lab's folders unless `EASYDETECT_LAB_ALLOW_PATHS`) |
+| `GET /api/datasets` · `GET /api/datasets/{id}` | the second lists the images |
+| `GET`/`POST /api/datasets/{id}/labels/{index}` | read and write one image's boxes; `?name=` (the file as the list gave it) answers 409 if the list changed — the same on `image`, `autolabel`, `outline` and `DELETE images` |
+| `POST /api/datasets/{id}/autolabel/{index}` | boxes for one image, from a model |
+| `POST /api/datasets/{id}/autolabel` | queue a pass over the whole dataset |
+| `POST /api/datasets/{id}/classes` | rename or add classes; data.yaml follows, its split kept |
+| `POST /api/datasets/{id}/classes/remove` | `{index, into?, dry_run?}` — delete a class, or merge it into `into`; every label file follows |
+| `POST /api/datasets/{id}/task` | `{task, keypoints?, skeleton?, dry_run?}` — boxes, outlines (`segment`) or keypoints (`pose`, `keypoints: [{name, was}]`); label files follow |
+| `POST /api/datasets/{id}/outline/{index}` | `{boxes}` — MobileSAM's outline for each box, as points |
+| `GET /api/models` | the registry, plus the names that download themselves |
+| `POST /api/models` | `{job_id, name, note}` — register a finished run |
+| `POST /api/models/upload` | multipart: `name`, `files` (a .pt or .onnx, or an IR's .xml + .bin together), `classes` |
+| `DELETE /api/models/{id}` | forget it (files stay) |
+| `POST /api/predict` | multipart: `model`, `conf`, and one of `dataset_id`, `path`, `video` (`path` and a `model` given as a path: inside the lab's folders unless `EASYDETECT_LAB_ALLOW_PATHS`) |
+| `POST /api/preview` | multipart: `model`, `conf`, `image` → annotated JPEG, one frame |
+| `POST /api/jobs` | `{dataset_id, model, epochs, imgsz, batch, freeze, device}`, optional `patience`, `augment`, `lr`, `lr_backbone_mult`, `weight_decay`, `warmup_epochs`, `seed`, `amp`, `int8`, `queries` (10–300), `denoising` (0–100) |
+| `GET /api/jobs` · `GET /api/jobs/{id}` | the second includes per-epoch rows |
+| `GET /api/gpu` | utilisation, memory, temperature and power per GPU, from nvidia-smi |
+| `GET /api/jobs/{id}/stream` | server-sent events: progress, then a status |
+| `POST /api/jobs/{id}/cancel` | |
+| `DELETE /api/jobs/{id}` | the job and its files, unless something still uses them |
+| `POST /api/jobs/{id}/resume` | `{add_epochs}` — continue a finished run |
+| `POST /api/jobs/{id}/evaluate` | `{conf}` — queue a scoring pass with pictures |
+| `GET /api/jobs/{id}/report` · `/eval/{name}` | the numbers, and the pictures |
+| `GET /api/jobs/{id}/download/{weights,openvino,onnx,results,log,predictions,video}` | |
+| `GET /api/jobs/{id}/download/pibo` | `pibo-job<id>.onnx` at the run's input size, with the class names and the score threshold with the best F1 on validation inside it (ONNX metadata `easydetect.names`, `easydetect.conf`); `pibo/detect.py` runs it with numpy, OpenCV and onnxruntime alone |
+| `GET /api/jobs/{id}/download/huggingface` | `?repo=&folder=&pt=` — the upload folder, zipped, with its README |
+| `GET /api/jobs/{id}/modelcard` | the README.md that bundle would carry, and where it would go |
+| `POST /api/jobs/{id}/predict` | multipart: `image`, `conf` → annotated JPEG |
+
+## What it is not
+
+One process, one SQLite file, one folder. No accounts, no permissions, no
+quotas, no scheduler, and one job at a time. That is the point: a workstation or
+a mini PC beside a line needs no infrastructure, and the data never leaves it.
+
+When that stops being true — several people, several GPUs, work that must
+survive a restart — the things to change are the worker (onto a real queue) and
+the storage (onto a service), not the package underneath.
+
+Other limits worth knowing:
+
+* Boxes only. Polygons, keypoints, review workflows and team assignment are out
+  of scope; [CVAT](https://github.com/cvat-ai/cvat) (MIT) and
+  [Label Studio](https://github.com/HumanSignal/label-studio) (Apache-2.0) export
+  the same layout, so you can label there and train here.
+* Training runs in this process, so restarting the server ends a run. Jobs left
+  behind are marked failed on the next start rather than spinning forever.
+* It has no login; see [Security](#security) below. Browsers only allow the
+  webcam on `https://` or `localhost`, so the same app is also served over
+  HTTPS on 8443 (`--https-port`, 0 turns it off) with a certificate made on
+  first start and kept in `easydetect-lab/tls/` — what a webcam on another
+  machine needs once `--host 0.0.0.0` lets it in. The browser warns about it
+  once; the webcam tab opened over `http://` links to the HTTPS address.
+
+## Security
+
+There are no accounts: whoever can open the page can do everything it does.
+Three things keep that to the people you mean:
+
+* **Only this machine, by default.** `python run.py` listens on `127.0.0.1`.
+  `--host 0.0.0.0` answers on every address so other machines can use it —
+  do that on a network you trust (a lab LAN, a line PC), never one open to
+  the internet.
+* **Checkpoints are read as weights only.** A `.pt` is a Python pickle, and a
+  pickle can carry code that runs when it is loaded. The lab loads `.pt` files
+  with `weights_only=True` (tensors, numbers, strings): one that holds anything
+  else is refused with a message. `EASYDETECT_TRUST_CHECKPOINTS=1` lifts that
+  for files you trust. An `.onnx` or OpenVINO IR carries no code.
+* **Requests from the lab's own pages only.** A page on another website can
+  make your browser send requests to the lab; a change (a POST, a DELETE)
+  that a browser marks as coming from another site is refused, and so is a
+  request under a host name that is not this machine's (DNS rebinding). Open
+  the lab by its IP address, `localhost` or the computer's name; a name of
+  your own in front of it (a reverse proxy) goes in
+  `EASYDETECT_LAB_HOSTS=lab.school.kr`. An upload over 4 GB is refused
+  (`EASYDETECT_LAB_MAX_UPLOAD_MB` changes it).
+* **No arbitrary paths over the API.** A folder to register, a folder to run a
+  batch over, or a model given as a file path must be inside the lab's data
+  folder, a dataset folder already registered, or a run it made. Start the
+  server with `EASYDETECT_LAB_ALLOW_PATHS=1` to allow any path on the machine
+  (fine when only you can reach it), or with a list of folders to allow
+  (`EASYDETECT_LAB_ALLOW_PATHS=/data/shots:/mnt/line`, `;`-separated on
+  Windows). `python run.py label --source` takes any folder: it is typed at
+  the machine itself.
+
+## Tests
+
+```bash
+pip install pytest httpx
+pytest
+```
+
+## From the platform/ folder
+
+The lab used to be `platform/` inside the easydetect repository (up to
+easydetect 0.2.0), and its data folder was `easydetect-platform/`. The
+database records datasets and runs by absolute path, so leave that folder
+where it is and point the lab at it:
+
+```bash
+python run.py --data ~/path/to/easydetect-platform
+```
+
+`$EASYDETECT_PLATFORM_HOME` still works too, and a data folder from then keeps
+its `platform.db`.
+
+## 한국어
+
+브라우저에서 라벨링 → 학습 → 평가 → 추론 → 배포까지 하는 앱입니다. 검출
+패키지 [easydetect](https://github.com/themakerrobot/easydetect)는 PyPI에서
+받아 쓰고, 이 저장소에는 앱만 있습니다. `pip install -r requirements.txt` 후
+`python run.py`. Windows에서는 `start-lab.bat`을 더블클릭하면 처음 한 번 설치하고 바로 열립니다. 앱 업데이트는 `git pull`, 패키지 업데이트는
+`pip install -U "easydetect[train]"`입니다. 예전 `platform/` 시절 데이터는
+`python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.
+인터넷 없는 교실에서는 릴리스의 `easydetect-lab-offline-win64.zip`을 풀고
+`start-lab-offline.bat`을 더블클릭합니다. GPU가 없으면 학습 목표가 **수업용
+(CPU)** 로 정해지고, 에폭은 데이터 크기에 맞춰 정해집니다(300장이면 35에폭, 수십
+장이면 100에폭까지; 노트북에서 10~15분 안팎). 사과·컵처럼 COCO에 있는 물체는
+COCO가 아는 것에서 시작해 적은 사진으로도 잘 배웁니다. 끝난 학습은 *다운로드 →
+Pibo로 보내기*로 로봇에 옮기고, 라즈베리파이 4B에서 한 장에 약 0.16초입니다.
+선생님용 안내: [docs/classroom.md](docs/classroom.md).
+추론 화면의 *물체 윤곽 칠하기*를 켜면 상자마다 마스크를 칠합니다(MobileSAM, 처음
+한 번 44 MB 내려받음, CPU에서 한 장에 약 150 ms + 상자당 25 ms).
+
+라벨링 화면 왼쪽 위 *라벨 종류*에서 상자 / 윤곽 / 키포인트를 고릅니다.
+- **윤곽**: 상자를 그리면 AI(MobileSAM)가 윤곽을 따 줍니다. <kbd>P</kbd>로
+  직접 점을 찍어 그릴 수도 있고(첫 점이나 <kbd>Enter</kbd>로 닫기), 점을 끌어
+  고치고, 선을 더블클릭해 점을 더하고, 점을 우클릭해 지웁니다. 학습하면
+  상자 검출기 다음에 MobileSAM의 마스크 디코더를 내 윤곽에 맞춥니다(기본
+  20에폭, 학습 전 점수보다 나빠지지 않음).
+- **키포인트**: 점 이름을 한 번 정하고(*COCO 사람 17점* 버튼도 있음), 상자를
+  그린 뒤 점을 차례로 클릭합니다. <kbd>Shift</kbd>+클릭은 가려진 점,
+  <kbd>Tab</kbd>은 다음 점, 우클릭은 가려짐 → 지우기. 학습하면 상자 검출기
+  다음에 키포인트 모델을 같은 에폭만큼 학습하고, 학습 화면에 그 단계의
+  진행과 AP가 나옵니다. 끝난 모델은 키포인트를 찍고(추론 화면 *키포인트
+  찍기*), 내보낸 OpenVINO/ONNX zip에 `pose.onnx`가 함께 들어갑니다.

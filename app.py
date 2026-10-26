@@ -1,0 +1,2372 @@
+# Apache-2.0
+"""easydetect lab — label, train, watch, download, in a browser.
+
+    pip install -r requirements.txt
+    python run.py                          # http://127.0.0.1:8080
+
+One process, one SQLite file, one folder (``easydetect-lab/`` where you start
+it; ``--data`` or ``$EASYDETECT_LAB_HOME`` moves it). It is built for a single
+box — a workstation, a mini PC beside a line — where the data must not leave the
+machine and there is nobody to run a queue broker. Users, permissions and
+schedulers are deliberately absent; see the README for what to do when you need
+them.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import functools
+import io
+import ipaddress
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import threading
+import time
+import weakref
+import zipfile
+from collections import OrderedDict
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
+
+import yaml
+from easydetect.data.labels import label_path as shared_label_path
+from easydetect.utils.imageio import cv2_path, imread, imwrite  # any path, Hangul included
+from fastapi import FastAPI, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+
+from db import Database
+from labeling import (
+    IMG_SUFFIXES,
+    TASKS,
+    dataset_task,
+    flip_pairs,
+    keypoint_names,
+    kpt_shape_of,
+    label_path,
+    labels_beside,
+    list_images,
+    predict_boxes,
+    read_labels,
+    simplify_outline,
+    write_labels,
+)
+from modelcard import model_card, slug
+from worker import Worker
+
+ROOT = Path(__file__).resolve().parent
+# EASYDETECT_PLATFORM_HOME: the name from when the lab was the package's platform/ folder
+DATA = Path(os.environ.get("EASYDETECT_LAB_HOME") or os.environ.get("EASYDETECT_PLATFORM_HOME")
+            or Path.cwd() / "easydetect-lab").expanduser()
+DATASETS, RUNS = DATA / "datasets", DATA / "runs"
+
+# a data folder from the platform/ days keeps its database file name
+db = Database(DATA / "platform.db" if (DATA / "platform.db").exists() else DATA / "lab.db")
+worker = Worker(db, RUNS)
+app = FastAPI(title="easydetect lab")
+#: the largest upload taken, in MB (a dataset zip, a video, a model)
+try:
+    MAX_UPLOAD_MB = int(os.environ.get("EASYDETECT_LAB_MAX_UPLOAD_MB") or 4096)
+except ValueError:
+    print("[lab] EASYDETECT_LAB_MAX_UPLOAD_MB is not a number; using 4096")
+    MAX_UPLOAD_MB = 4096
+
+
+def _host_name(netloc: str) -> str:
+    """``"192.168.0.5:8080"`` -> ``"192.168.0.5"``, ``"[::1]:8080"`` -> ``"::1"``."""
+    netloc = netloc.strip().lower()
+    if netloc.startswith("["):
+        return netloc[1:netloc.find("]")] if "]" in netloc else netloc
+    return netloc.rsplit(":", 1)[0] if netloc.count(":") == 1 else netloc
+
+
+def _extra_hosts() -> frozenset[str]:
+    """``$EASYDETECT_LAB_HOSTS``: names of the lab's own, a reverse proxy's say."""
+    extra = os.environ.get("EASYDETECT_LAB_HOSTS", "")
+    return frozenset(n.strip().lower() for n in extra.split(",") if n.strip())
+
+
+@functools.lru_cache(maxsize=1)
+def _own_names() -> frozenset[str]:
+    names = {"localhost"}
+    with contextlib.suppress(OSError):
+        host = socket.gethostname().lower()
+        names |= {host, f"{host}.local", socket.getfqdn().lower()}
+    return frozenset(names | _extra_hosts())
+
+
+def _host_allowed(netloc: str) -> bool:
+    """An address, or a name of this machine (or one in ``$EASYDETECT_LAB_HOSTS``).
+
+    A web page elsewhere can point a name of its own at this machine's
+    address (DNS rebinding) and then read the lab as if it were the same
+    site; such a request carries that other name, and is refused."""
+    host = _host_name(netloc)
+    if host in _own_names() or host.endswith(".localhost"):
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+@app.middleware("http")
+async def _guard(request, call_next):
+    """Requests from this lab's own pages only, and uploads of a sane size.
+
+    A page on another site can make the browser send a POST here (it cannot
+    read the answer, but a POST is enough to delete a dataset): browsers say
+    where such a request comes from, in ``Origin`` and ``Sec-Fetch-Site``,
+    and those that are not this lab are refused. Scripts and curl send
+    neither and are let through: they run on a machine already trusted."""
+    host = request.headers.get("host", "")
+    if host and not _host_allowed(host):
+        return JSONResponse({"error": f"이 주소({_host_name(host)})로는 lab을 열 수 없어요. "
+                                      "IP 주소로 열거나 EASYDETECT_LAB_HOSTS에 이름을 넣어 주세요"},
+                            status_code=403)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        # "null": a sandboxed frame or a redirected form, never the lab's own page.
+        # A page behind a reverse proxy that rewrites Host has the proxy's name
+        # as its origin: one listed in EASYDETECT_LAB_HOSTS is the lab's own.
+        foreign = origin is not None and (
+            origin == "null" or (urlsplit(origin).netloc.lower() != host.lower()
+                                 and _host_name(urlsplit(origin).netloc) not in _extra_hosts()))
+        if request.headers.get("sec-fetch-site") == "cross-site" or foreign:
+            return JSONResponse({"error": "다른 사이트에서 온 요청은 받지 않아요"}, status_code=403)
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > MAX_UPLOAD_MB * 1024 * 1024:
+            return JSONResponse({"error": f"파일이 너무 커요 (최대 {MAX_UPLOAD_MB} MB). "
+                                          "EASYDETECT_LAB_MAX_UPLOAD_MB로 늘릴 수 있어요"},
+                                status_code=413)
+    return await call_next(request)
+# the themaker-ui design kit and its fonts; the pages link them relatively
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+#: loaded models, least recently used first: (task, resolved path or name, mtime) -> Detector
+_models: OrderedDict[tuple, object] = OrderedDict()
+#: a few at once: each compiled model holds hundreds of MB, and a webcam session switches often
+MODEL_CACHE_SIZE = 4
+_models_lock = threading.Lock()
+#: one caller at a time per model: its first call exports and compiles lazily
+_model_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+#: seconds between two looks at a job for its progress stream
+STREAM_POLL = 1.0
+#: what training leaves beside a detector for task="pose" / "segment" to find
+SIBLING_MODELS = ("pose.onnx", "mask_decoder.onnx")
+
+
+_started = threading.Lock()
+
+
+@app.on_event("startup")
+def _start() -> None:
+    """Folders, stale jobs, the worker — once per process.
+
+    It runs from every server's startup (HTTP and HTTPS both) and from label
+    mode before them. A second pass would find the job the worker had just
+    started and mark it interrupted by a restart.
+    """
+    if not _started.acquire(blocking=False):
+        return
+    for folder in (DATASETS, RUNS):
+        folder.mkdir(parents=True, exist_ok=True)
+    reaped = worker.reap_stale()
+    if reaped:
+        print(f"[lab] {reaped} job(s) were left running by a previous process")
+    if not worker.is_alive():
+        worker.start()
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/label/{dataset_id}", response_class=HTMLResponse)
+def label_page(dataset_id: int) -> str:
+    _dataset(dataset_id)
+    return (ROOT / "static" / "label.html").read_text(encoding="utf-8")
+
+
+# ----------------------------------------------------------------- datasets
+
+
+@app.post("/api/datasets")
+def upload_dataset(name: str = Form(...), archive: UploadFile = None):
+    """Take a zip of images (+ labels, + data.yaml if you have one).
+
+    A YOLO export from a labelling service goes in as it is: ``images/train`` +
+    ``labels/train``, or ``train/images`` + ``train/labels`` with a data.yaml
+    saying ``../train/images`` — the trainer resolves both. The zip is written
+    to disk in chunks rather than held in memory, and a single wrapping
+    folder (or macOS's ``__MACOSX``) is unpacked away. A plain ``def``: FastAPI
+    runs it in a worker thread, so unpacking a large zip does not stall the
+    other requests (the webcam, the progress stream) while it goes.
+    """
+    if archive is None:
+        raise HTTPException(400, "zip 파일이 없어요")
+    target = _fresh_dir(DATASETS, name)
+    target.mkdir(parents=True)
+    scratch = target / ".upload.zip"
+    try:
+        _save_upload(archive, scratch)
+        with zipfile.ZipFile(scratch) as zf:
+            _safe_extract(zf, target)
+    except zipfile.BadZipFile as exc:
+        shutil.rmtree(target, ignore_errors=True)
+        raise HTTPException(400, "zip 파일이 아니에요") from exc
+    finally:
+        scratch.unlink(missing_ok=True)
+    _unwrap(target)
+    _detach(target)
+    return _register(name, target)
+
+
+def _detach(target: Path) -> None:
+    """An uploaded copy reads its own files, not the ones it was zipped from.
+
+    A data.yaml's ``path:`` can name a folder that exists on this machine — the
+    original, when the zip was made here. Training would read that and ignore
+    every label edited in the copy. Without the key, paths resolve from the
+    yaml's own folder.
+    """
+    yaml_file = target / "data.yaml"
+    if not yaml_file.exists():
+        return
+    cfg = yaml.safe_load(yaml_file.read_text(encoding="utf-8")) or {}
+    if isinstance(cfg, dict) and "path" in cfg:
+        cfg.pop("path")
+        yaml_file.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True),
+                             encoding="utf-8")
+
+
+def _unwrap(target: Path) -> None:
+    """``dataset.zip/dataset/data.yaml`` -> ``data.yaml`` at the top, where training reads it.
+
+    Only then: a zip holding just ``images/`` is a dataset, not a wrapper.
+    """
+    shutil.rmtree(target / "__MACOSX", ignore_errors=True)
+    entries = [e for e in target.iterdir() if not e.name.startswith(".")]
+    if (
+        len(entries) != 1
+        or not entries[0].is_dir()
+        or (target / "data.yaml").exists()
+        or not (entries[0] / "data.yaml").exists()
+    ):
+        return
+    holder = entries[0].rename(target / ".unwrap")   # its children may share its name
+    for child in holder.iterdir():
+        shutil.move(str(child), target / child.name)
+    holder.rmdir()
+
+
+@app.post("/api/datasets/images")
+def upload_images(
+    name: str = Form(...), dataset_id: int = Form(None), files: list[UploadFile] = None
+):
+    """Take image files straight from the file picker — no zip to make first."""
+    if not files:
+        raise HTTPException(400, "올린 파일이 없어요")
+    target, dataset = _collection_target(name, dataset_id)
+    written = 0
+    for upload in files:
+        if Path(upload.filename or "").suffix.lower() not in IMG_SUFFIXES:
+            continue
+        _save_upload(upload, _unique(target / Path(upload.filename).name))
+        written += 1
+    if not written:
+        _discard(target, dataset)
+        raise HTTPException(400, "이미지 파일이 하나도 없어요")
+    return _finish_collection(name, target, dataset, added=written)
+
+
+@app.post("/api/datasets/video")
+def upload_video(
+    name: str = Form(...),
+    dataset_id: int = Form(None),
+    every: int = Form(30),
+    max_frames: int = Form(300),
+    video: UploadFile = None,
+):
+    """Sample frames out of a video into a dataset.
+
+    Collection usually starts with a recording, not a folder of stills. One
+    frame every ``every`` frames, up to ``max_frames`` — consecutive frames are
+    nearly identical and only cost labelling time. Decoding runs in a worker
+    thread (a plain ``def``), not on the server's event loop.
+    """
+    import cv2
+
+    if video is None:
+        raise HTTPException(400, "올린 영상이 없어요")
+    target, dataset = _collection_target(name, dataset_id)
+    scratch = target / f".{int(time.time())}_{Path(video.filename or 'clip').name}"
+    _save_upload(video, scratch)
+
+    capture = cv2.VideoCapture(cv2_path(scratch))
+    if not capture.isOpened():
+        scratch.unlink(missing_ok=True)
+        _discard(target, dataset)
+        raise HTTPException(400, "영상을 읽지 못했어요")
+
+    stem = _slug(Path(video.filename or "clip").stem)
+    written = index = 0
+    try:
+        while written < max(int(max_frames), 1):
+            ok, frame = capture.read()
+            if not ok:
+                break
+            if index % max(int(every), 1) == 0:
+                imwrite(str(_unique(target / f"{stem}_{index:06d}.jpg")), frame)
+                written += 1
+            index += 1
+    finally:
+        capture.release()
+        scratch.unlink(missing_ok=True)
+
+    if not written:
+        _discard(target, dataset)
+        raise HTTPException(400, "영상에 프레임이 없어요")
+    return _finish_collection(name, target, dataset, added=written, scanned=index)
+
+
+@app.post("/api/datasets/local")
+def add_local_dataset(payload: dict):
+    """Register a folder already on this machine, without copying it.
+
+    Over the API only inside the lab's folders, unless the server allows any
+    path (see :func:`_allowed_path`); ``run.py label --source`` is typed at
+    this machine and goes through :func:`register_folder` directly.
+    """
+    _allowed_path(Path(str(payload.get("path", ""))))
+    return register_folder(payload)
+
+
+def register_folder(payload: dict) -> dict:
+    path = Path(str(payload.get("path", ""))).expanduser()
+    if not path.is_dir():
+        raise HTTPException(400, f"{path}은(는) 폴더가 아니에요")
+    names = payload.get("names") or None
+    return _register(payload.get("name") or path.name, path, names=names)
+
+
+@app.get("/api/datasets")
+def list_datasets():
+    rows = db.query("SELECT * FROM datasets ORDER BY id DESC")
+    for row in rows:
+        row["classes"] = json.loads(row["classes"])
+        row["task"] = _labelling(row)["task"]
+    return rows
+
+
+@app.get("/api/datasets/{dataset_id}")
+def get_dataset(dataset_id: int):
+    dataset = _dataset(dataset_id)
+    images_root = Path(dataset["images_dir"])
+    images = _images(dataset)
+    dataset["classes"] = json.loads(dataset["classes"])
+    dataset["files"] = [_file_entry(p, images_root) for p in images]
+    dataset.update(_labelling(dataset, images))
+    return dataset
+
+
+def _file_entry(image: Path, images_root: Path) -> dict:
+    """Name, whether a label exists, and how many boxes it holds.
+
+    An empty label is a deliberate answer — a background frame with nothing in
+    it — and must look different from one with boxes. Counting lines, not
+    parsing them: a 7,000-image set lists in well under a second.
+    """
+    label = label_path(image)
+    try:
+        with open(label, encoding="utf-8") as handle:
+            boxes = sum(1 for line in handle if line.split())
+        labelled = True
+    except FileNotFoundError:
+        boxes, labelled = 0, False
+    return {"name": image.relative_to(images_root).as_posix(), "labelled": labelled, "boxes": boxes}
+
+
+# The pages address a picture by its index in the list they loaded; ``name``
+# (optional, as the list gave it) makes a request refuse to touch another
+# picture when the folder changed in between — boxes saved onto the wrong image.
+
+
+@app.get("/api/datasets/{dataset_id}/image/{index}")
+def dataset_image(dataset_id: int, index: int, name: str | None = None):
+    return FileResponse(_image_at(_dataset(dataset_id), index, name))
+
+
+@app.get("/api/datasets/{dataset_id}/labels/{index}")
+def get_labels(dataset_id: int, index: int, name: str | None = None):
+    return {"boxes": read_labels(_label_file(dataset_id, index, name),
+                                 _kpt_shape(_dataset(dataset_id)))}
+
+
+@app.post("/api/datasets/{dataset_id}/labels/{index}")
+def save_labels(dataset_id: int, index: int, payload: dict, name: str | None = None):
+    """Write one image's boxes. The labelled count moves by one, not by a rescan."""
+    label = _label_file(dataset_id, index, name)
+    first_time = not label.exists()
+    write_labels(label, payload.get("boxes", []), _kpt_shape(_dataset(dataset_id)))
+    if first_time:
+        db.execute("UPDATE datasets SET labelled = labelled + 1 WHERE id = ?", (dataset_id,))
+    return {"saved": True}
+
+
+@app.post("/api/datasets/{dataset_id}/autolabel/{index}")
+def autolabel_one(dataset_id: int, index: int, payload: dict, name: str | None = None):
+    """Boxes for the image on screen, from a model — the first draft to correct."""
+    dataset = _dataset(dataset_id)
+    image = _image_at(dataset, index, name)
+    model_name = _resolve_model(payload.get("model") or _default_model(dataset_id))
+    task = _labelling(dataset)["task"]
+    try:
+        model = _model(model_name, task)
+        with _using(model):
+            boxes = predict_boxes(
+                model, image, json.loads(dataset["classes"]), float(payload.get("conf", 0.35)),
+                kpt_names=keypoint_names(_data_cfg(dataset)) if task == "pose" else None,
+            )
+    except Exception as exc:  # a missing model must not kill the page
+        raise HTTPException(503, str(exc)) from exc
+    return {"boxes": boxes}
+
+
+@app.post("/api/datasets/{dataset_id}/outline/{index}")
+def outline(dataset_id: int, index: int, payload: dict, name: str | None = None):
+    """Outlines for boxes on the image on screen — MobileSAM draws, a person
+    corrects. The dataset's own fine-tuned mask decoder, once it has one."""
+    import numpy as np
+
+    dataset = _dataset(dataset_id)
+    image = _image_at(dataset, index, name)
+    boxes = payload.get("boxes") or []
+    img = imread(str(image))
+    if img is None:
+        raise HTTPException(400, "이미지를 읽지 못했어요")
+    h, w = img.shape[:2]
+    xyxy = np.array([[(b["cx"] - b["w"] / 2) * w, (b["cy"] - b["h"] / 2) * h,
+                      (b["cx"] + b["w"] / 2) * w, (b["cy"] + b["h"] / 2) * h]
+                     for b in boxes], np.float32).reshape(-1, 4)
+    try:
+        masks, _ = _segmenter(dataset_id)(img, xyxy)
+    except Exception as exc:  # a download that failed must not kill the page
+        raise HTTPException(503, str(exc)) from exc
+    from easydetect.results import Masks
+
+    return {"outlines": [simplify_outline(xy, w, h) for xy in Masks(masks).xy]}
+
+
+_segmenters: dict[str, object] = {}
+
+
+def _segmenter(dataset_id: int):
+    """MobileSAM, or the mask decoder the dataset's latest run trained."""
+    from easydetect.segment import default_segmenter
+
+    decoder = None
+    run = _latest_run(dataset_id)
+    if run is not None and (run / "weights" / "mask_decoder.onnx").exists():
+        decoder = run / "weights" / "mask_decoder.onnx"
+    key = str(decoder)
+    if key not in _segmenters:
+        _segmenters.clear()   # one at a time: a decoder is small, the encoder is not
+        _segmenters[key] = default_segmenter(decoder=decoder)
+    return _segmenters[key]
+
+
+@app.post("/api/datasets/{dataset_id}/task")
+def set_task(dataset_id: int, payload: dict):
+    """What the dataset is labelled for — boxes, outlines or keypoints — and,
+    for keypoints, which ones.
+
+    ``keypoints`` is the new list, each ``{"name", "was"}`` with ``was`` the
+    keypoint's index before (None for a new one), so renaming, adding,
+    removing and reordering carry every label file's keypoints along.
+    Switching to keypoints keeps the boxes (outlines become their boxes);
+    leaving keypoints drops them. ``dry_run`` only counts what would change.
+    """
+    dataset = _dataset(dataset_id)
+    task = str(payload.get("task") or "detect")
+    if task not in TASKS:
+        raise HTTPException(400, f"라벨 종류는 {', '.join(TASKS)} 중 하나예요")
+    path, cfg = _data_yaml(dataset)
+    old_shape = kpt_shape_of(cfg)
+    new_shape, names, mapping = None, None, None
+    if task == "pose":
+        entries = payload.get("keypoints") or []
+        names = [str(e.get("name", "")).strip() for e in entries]
+        if not names or not all(names):
+            raise HTTPException(400, "키포인트마다 이름을 적어 주세요 (하나 이상)")
+        if len(set(names)) != len(names):
+            raise HTTPException(400, "같은 이름의 키포인트가 두 개 있어요")
+        old_k = old_shape[0] if old_shape else 0
+        mapping = []
+        for e in entries:
+            was = e.get("was")
+            mapping.append(None if was in (None, "") or not 0 <= int(was) < old_k else int(was))
+        new_shape = [len(names), 3]
+        skeleton = []
+        for pair in payload.get("skeleton") or []:
+            a, b = int(pair[0]), int(pair[1])
+            if a != b and 0 <= a < len(names) and 0 <= b < len(names):
+                skeleton.append([a, b])
+        flip = payload.get("flip")
+        if not (isinstance(flip, list) and sorted(int(f) for f in flip) == list(range(len(names)))):
+            flip = flip_pairs(names)
+
+    unchanged = old_shape == new_shape and mapping == list(range(len(mapping or [])))
+    rewrites, outlines, kept = [], 0, 0
+    if (old_shape is not None or new_shape is not None) and not unchanged:
+        for image in _images(dataset):
+            label = label_path(image)
+            if not label.exists():
+                continue
+            rows = read_labels(label, old_shape)
+            for row in rows:
+                outlines += bool(row.pop("points", None))
+                old = row.pop("kpts", None) or []
+                if new_shape is not None:
+                    row["kpts"] = [old[j] if j is not None and j < len(old) else [0, 0, 0]
+                                   for j in mapping]
+                    kept += sum(1 for k in row["kpts"] if k[2] > 0)
+            rewrites.append((label, rows))
+    result = {"files": len(rewrites), "outlines_dropped": outlines if new_shape else 0,
+              "keypoints_kept": kept}
+    if payload.get("dry_run"):
+        return result
+    busy = db.one(
+        "SELECT id FROM jobs WHERE dataset_id = ? AND kind IN ('train', 'autolabel')"
+        " AND status IN ('queued', 'running', 'exporting')", (dataset_id,))
+    if busy and rewrites:
+        raise HTTPException(409, f"#{busy['id']}이(가) 이 데이터셋을 쓰고 있어요."
+                                 " 끝나길 기다리거나 멈춰 주세요")
+
+    for label, rows in rewrites:            # each file whole, or not at all
+        scratch = label.with_name(label.name + ".tmp")
+        write_labels(scratch, rows, new_shape)
+        os.replace(scratch, label)
+    for key in ("kpt_shape", "flip_idx", "kpt_names", "skeleton"):
+        cfg.pop(key, None)
+    cfg["task"] = task
+    if new_shape is not None:
+        classes = json.loads(dataset["classes"])
+        cfg.update({"kpt_shape": new_shape, "flip_idx": flip,
+                    "kpt_names": {i: names for i in range(len(classes))},
+                    "skeleton": skeleton})
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {**result, **_labelling(dataset)}
+
+
+@app.post("/api/datasets/{dataset_id}/autolabel")
+def autolabel_all(dataset_id: int, payload: dict):
+    """Queue a pass over every unlabelled image in the dataset."""
+    _dataset(dataset_id)
+    job_id = db.add_job(
+        kind="autolabel",
+        dataset_id=dataset_id,
+        model=_resolve_model(payload.get("model") or _default_model(dataset_id)),
+        conf=float(payload.get("conf", 0.35)),
+    )
+    return {"id": job_id}
+
+
+@app.get("/api/datasets/{dataset_id}/stats")
+def dataset_stats(dataset_id: int):
+    """What is actually in there — the numbers you check before training."""
+    dataset = _dataset(dataset_id)
+    images_root = Path(dataset["images_dir"])
+    names = json.loads(dataset["classes"])
+
+    per_class = dict.fromkeys(range(len(names)), 0)
+    unknown_class = 0
+    boxes = tiny = 0
+    shape = _kpt_shape(dataset)
+    kpt_names = keypoint_names(_data_cfg(dataset)) or []
+    per_keypoint = [0] * len(kpt_names)
+    outlines = no_keypoints = 0
+    unlabelled: list[str] = []
+    empty: list[str] = []
+    images = _images(dataset)
+    for image in images:
+        label = label_path(image)
+        if not label.exists():
+            unlabelled.append(image.relative_to(images_root).as_posix())
+            continue
+        rows = read_labels(label, shape)
+        if not rows:
+            empty.append(image.relative_to(images_root).as_posix())
+        for row in rows:
+            boxes += 1
+            outlines += bool(row.get("points"))
+            placed = [k[2] > 0 for k in row.get("kpts") or []]
+            no_keypoints += shape is not None and not any(placed)
+            for j, on in enumerate(placed[:len(per_keypoint)]):
+                per_keypoint[j] += on
+            if row["cls"] in per_class:
+                per_class[row["cls"]] += 1
+            else:
+                unknown_class += 1
+            if row["w"] * row["h"] < 0.001:  # under 0.1% of the frame
+                tiny += 1
+    return {
+        "images": len(images),
+        "boxes": boxes,
+        "per_class": [{"name": n, "boxes": per_class.get(i, 0)} for i, n in enumerate(names)],
+        "unknown_class_boxes": unknown_class,
+        "unlabelled": unlabelled,
+        "empty_labels": empty,
+        "tiny_boxes": tiny,
+        "task": _labelling(dataset, images)["task"],
+        "outlines": outlines,
+        "per_keypoint": [{"name": n, "placed": c}
+                         for n, c in zip(kpt_names, per_keypoint, strict=True)],
+        "boxes_without_keypoints": no_keypoints,
+    }
+
+
+@app.delete("/api/datasets/{dataset_id}/images/{index}")
+def delete_image(dataset_id: int, index: int, name: str | None = None):
+    """Drop one image and its label — blurred frames are not worth labelling."""
+    dataset = _dataset(dataset_id)
+    image = _image_at(dataset, index, name)
+    image.unlink(missing_ok=True)
+    label_path(image).unlink(missing_ok=True)
+    _forget_images(dataset_id)
+    worker.refresh_counts(dataset_id)
+    return {"deleted": True, "images": len(_images(dataset))}
+
+
+@app.post("/api/datasets/{dataset_id}/duplicate")
+def duplicate_dataset(dataset_id: int, payload: dict = None):
+    """A copy to experiment on — relabelling in place is a one-way door."""
+    dataset = _dataset(dataset_id)
+    name = (payload or {}).get("name") or f"{dataset['name']}-copy"
+    return _combine([dataset], name)
+
+
+@app.post("/api/datasets/merge")
+def merge_datasets(payload: dict):
+    """One dataset out of several, with class indices remapped onto a union."""
+    # sorted, so the class union comes out the same whatever order they were picked in
+    ids = sorted({int(i) for i in payload.get("ids") or []})
+    if len(ids) < 2:
+        raise HTTPException(400, "합칠 데이터셋을 두 개 이상 골라 주세요")
+    return _combine([_dataset(i) for i in ids], payload.get("name") or "merged")
+
+
+@app.get("/api/datasets/{dataset_id}/export")
+def export_dataset(dataset_id: int):
+    """The whole dataset as a zip: images, labels, data.yaml — ready to re-import."""
+    dataset = _dataset(dataset_id)
+    images_root = Path(dataset["images_dir"])
+    arcname = {}  # image on disk -> where it goes in the zip
+    for image in _images(dataset):
+        arcname[image.resolve()] = PurePosixPath("images", *image.relative_to(images_root).parts)
+    cfg = {"train": "images", "val": "images"}
+    splits = _split_lists(dataset, arcname)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for image, arc in arcname.items():
+            zf.write(image, str(arc))
+            label = label_path(image)
+            if label.exists():
+                # the same rule applied to the zip's own paths, so the trainer
+                # finds every label after unpacking, whatever the layout was
+                zf.write(label, str(shared_label_path(arc)))
+        for split, arcs in splits.items():     # keep the dataset's own split
+            zf.writestr(f"{split}.txt", "\n".join(arcs) + "\n")
+            cfg[split] = f"{split}.txt"
+        cfg["names"] = dict(enumerate(json.loads(dataset["classes"])))
+        own = _data_cfg(dataset)
+        for key in ("task", "kpt_shape", "flip_idx", "kpt_names", "skeleton"):
+            if key in own:
+                cfg[key] = own[key]
+        zf.writestr("data.yaml", yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
+    buffer.seek(0)
+    name = _slug(dataset["name"])
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
+    )
+
+
+@app.delete("/api/datasets/{dataset_id}")
+def delete_dataset(dataset_id: int):
+    """Forget a dataset. Uploaded copies are removed; registered folders are left alone."""
+    dataset = _dataset(dataset_id)
+    running = db.one(
+        "SELECT id FROM jobs WHERE dataset_id = ? AND status IN ('queued', 'running', 'exporting')",
+        (dataset_id,),
+    )
+    if running:
+        raise HTTPException(400, f"#{running['id']}이(가) 아직 이 데이터셋을 쓰고 있어요")
+    path = Path(dataset["path"])
+    removed = path.parent == DATASETS and path.is_dir()
+    if removed:
+        shutil.rmtree(path, ignore_errors=True)
+    db.execute("DELETE FROM epochs WHERE job_id IN (SELECT id FROM jobs WHERE dataset_id = ?)",
+               (dataset_id,))
+    db.execute("DELETE FROM jobs WHERE dataset_id = ?", (dataset_id,))
+    db.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+    _forget_images(dataset_id)       # SQLite may give the id to the next dataset
+    return {"deleted": True, "files_removed": removed}
+
+
+@app.post("/api/datasets/{dataset_id}/classes")
+def set_classes(dataset_id: int, payload: dict):
+    """Rename or add classes; the data.yaml follows."""
+    dataset = _dataset(dataset_id)
+    names = [str(n).strip() for n in payload.get("names", []) if str(n).strip()]
+    if not names:
+        raise HTTPException(400, "클래스 이름을 하나 이상 적어 주세요")
+    highest = _highest_class_in_use(dataset)
+    if highest is not None and len(names) <= highest:
+        raise HTTPException(
+            400,
+            f"라벨이 이미 클래스 {highest}을(를) 써요. 이름을 {highest + 1}개 이상 두거나 "
+            f"그 상자부터 고쳐 주세요",
+        )
+    db.update_dataset(dataset_id, classes=json.dumps(names, ensure_ascii=False))
+    _rename_in_data_yaml(dataset, names)
+    return {"names": names}
+
+
+@app.post("/api/datasets/{dataset_id}/classes/remove")
+def remove_class(dataset_id: int, payload: dict):
+    """Delete a class, or merge it into another; every label file follows.
+
+    Label rows name their class by index, so a class cannot just leave the
+    list: its rows go (or, with ``into``, become that class), and every
+    higher index moves down one, in every label file — or the boxes left
+    would train under their neighbours' names. ``dry_run`` only counts.
+    Refused while a training run or an auto-label pass uses the dataset.
+    """
+    dataset = _dataset(dataset_id)
+    names = json.loads(dataset["classes"])
+    try:
+        index = int(payload["index"])
+        into = None if payload.get("into") in (None, "") else int(payload["into"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(400, "지울 클래스 번호를 주세요") from None
+    if not 0 <= index < len(names):
+        raise HTTPException(400, "그런 클래스가 없어요")
+    if into is not None and (into == index or not 0 <= into < len(names)):
+        raise HTTPException(400, "있는 다른 클래스로 합쳐 주세요")
+    if into is None and len(names) == 1:
+        raise HTTPException(400, "데이터셋에는 클래스가 하나는 있어야 해요")
+    busy = db.one(
+        "SELECT id FROM jobs WHERE dataset_id = ? AND kind IN ('train', 'autolabel')"
+        " AND status IN ('queued', 'running', 'exporting')", (dataset["id"],))
+    if busy:
+        raise HTTPException(409, f"#{busy['id']}이(가) 이 데이터셋을 쓰고 있어요."
+                                 " 끝나길 기다리거나 멈춰 주세요")
+
+    rewrites, removed, moved = [], 0, 0
+    for image in _images(dataset):
+        path = label_path(image)
+        if not path.exists():
+            continue
+        lines, changed = [], False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            try:
+                cls = int(float(parts[0]))
+            except (IndexError, ValueError):
+                lines.append(line)            # not a box row: left as it was
+                continue
+            if cls == index:
+                changed = True
+                if into is None:
+                    removed += 1
+                    continue
+                moved += 1
+                cls = into
+            if cls > index:
+                cls -= 1
+                changed = True
+            lines.append(" ".join([str(cls), *parts[1:]]))
+        if changed:
+            rewrites.append((path, lines))
+    result = {"removed": removed, "moved": moved, "files": len(rewrites)}
+    if payload.get("dry_run"):
+        return result
+
+    for path, lines in rewrites:              # each file whole, or not at all
+        scratch = path.with_name(path.name + ".tmp")
+        scratch.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        os.replace(scratch, path)
+    names = names[:index] + names[index + 1:]
+    db.update_dataset(dataset["id"], classes=json.dumps(names, ensure_ascii=False))
+    _rename_in_data_yaml(dataset, names)
+    return {**result, "names": names}
+
+
+# --------------------------------------------------------------------- jobs
+
+
+@app.get("/api/models")
+def list_models():
+    """Everything that can be used as a model: the registry plus the mirror names."""
+    rows = db.query("SELECT * FROM models ORDER BY id DESC")
+    for row in rows:
+        row["classes"] = json.loads(row["classes"])
+    from easydetect.downloads import MODEL_NAMES
+
+    return {"models": rows, "builtin": list(MODEL_NAMES)}
+
+
+@app.post("/api/models")
+def register_model(payload: dict):
+    """Give a trained run a name, so it can be picked like any other model."""
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (payload.get("job_id"),))
+    if job is None or not job["run_dir"]:
+        raise HTTPException(404, "이 작업에는 가중치가 없어요")
+    xml = _main_ir(Path(job["run_dir"]))
+    weights = xml or Path(job["run_dir"]) / "weights" / "best.pt"
+    if not Path(weights).exists():
+        raise HTTPException(404, "가중치 파일이 없어요")
+    dataset = db.one("SELECT * FROM datasets WHERE id = ?", (job["dataset_id"],))
+    model_id = db.add_model(
+        name=str(payload.get("name") or f"job{job['id']}"),
+        path=str(weights),
+        kind="openvino" if xml else "torch",
+        job_id=job["id"],
+        classes=json.loads(dataset["classes"]) if dataset else [],
+        note=payload.get("note"),
+    )
+    return {"id": model_id}
+
+
+@app.post("/api/models/upload")
+def upload_model(
+    name: str = Form(...),
+    files: list[UploadFile] = None,
+    file: UploadFile = None,
+    classes: str = Form(""),
+):
+    """Bring a model in from outside — a .pt from a colleague, or an IR as .xml + .bin.
+
+    An OpenVINO IR is two files that must sit together under one stem, so
+    they are taken in one upload and the .bin is named after the .xml. A
+    ``.pt`` is a pickle and runs code when loaded: only checkpoints you trust.
+    """
+    uploads = [u for u in [*(files or []), file] if u is not None and u.filename]
+    if not uploads:
+        raise HTTPException(400, "올린 파일이 없어요")
+    by_suffix = {Path(u.filename).suffix.lower(): u for u in uploads}
+    suffix = next((s for s in (".pt", ".onnx", ".xml") if s in by_suffix), None)
+    if suffix is None:
+        raise HTTPException(400, ".pt, .onnx, 또는 IR의 .xml과 .bin을 올려 주세요")
+    if suffix == ".xml" and ".bin" not in by_suffix:
+        raise HTTPException(
+            400, "OpenVINO IR은 파일 두 개예요. .xml과 .bin을 함께 골라 주세요"
+        )
+
+    folder = _fresh_dir(DATA / "models", name)
+    folder.mkdir(parents=True)
+    main = by_suffix[suffix]
+    path = folder / Path(main.filename).name
+    for upload in uploads:
+        target = folder / Path(upload.filename).name
+        if upload is by_suffix.get(".bin"):
+            target = path.with_suffix(".bin")  # what read_model looks for beside the .xml
+        _save_upload(upload, target)
+    model_id = db.add_model(
+        name=name,
+        path=str(path),
+        kind="openvino" if suffix == ".xml" else "torch",
+        classes=[c.strip() for c in classes.split(",") if c.strip()],
+        note="업로드",
+    )
+    return {"id": model_id, "path": str(path)}
+
+
+@app.delete("/api/models/{model_id}")
+def delete_model(model_id: int):
+    model = db.one("SELECT * FROM models WHERE id = ?", (model_id,))
+    if model is None:
+        raise HTTPException(404, "그런 모델이 없어요")
+    db.execute("DELETE FROM models WHERE id = ?", (model_id,))
+    return {"deleted": True}
+
+
+def _box_filters(iou: str | None, contain: str | None) -> dict:
+    """The overlap filters a prediction asked for, as ``predict()`` takes them.
+
+    ``iou`` is the NMS threshold (1 turns it off, since no IoU exceeds 1);
+    ``contain`` merges a box lying inside another of its class (empty: off).
+    Left out, each stays at easydetect's default.
+    """
+    out = {}
+    for key, value in (("iou", iou), ("contain", contain)):
+        if value in (None, ""):
+            continue
+        try:
+            value = float(value)
+        except ValueError:
+            raise HTTPException(400, f"{key}은(는) 숫자여야 해요") from None
+        if not 0 < value <= 1:
+            raise HTTPException(400, f"{key}은(는) 0보다 크고 1 이하여야 해요")
+        out[key] = value
+    return out
+
+
+@app.post("/api/predict")
+def batch_predict(
+    model: str = Form(...),
+    conf: float = Form(0.5),
+    dataset_id: int = Form(None),
+    path: str = Form(None),
+    video: UploadFile = None,
+    iou: str = Form(None),
+    contain: str = Form(None),
+    segment: str = Form(None),
+    task: str = Form(None),
+):
+    """Queue a run over a dataset, a folder on this machine, or an uploaded video.
+
+    A path must be inside the lab's folders unless the server allows any
+    (:func:`_allowed_path`).
+    """
+    model = _resolve_model(model)        # refused before a video is copied anywhere
+    if video is not None:
+        folder = _fresh_dir(DATA / "predict-input", "clip")
+        folder.mkdir(parents=True)
+        source = folder / Path(video.filename or "clip.mp4").name
+        _save_upload(video, source)
+    elif dataset_id:
+        source = Path(_dataset(dataset_id)["images_dir"])
+    elif path:
+        source = _allowed_path(Path(path)).expanduser()
+        if not source.exists():
+            raise HTTPException(400, f"{source}이(가) 없어요")
+    else:
+        raise HTTPException(400, "데이터셋, 폴더 경로, 영상 중 하나를 주세요")
+    filters = _box_filters(iou, contain)
+    job_id = db.add_job(
+        kind="predict",
+        dataset_id=dataset_id or 0,
+        model=model,
+        conf=conf,
+        source=str(source),
+        task=None if _task(segment, task) == "detect" else _task(segment, task),
+        **filters,
+    )
+    return {"id": job_id}
+
+
+@app.post("/api/jobs")
+def create_job(payload: dict):
+    dataset = _dataset(payload.get("dataset_id"))
+    if not dataset["labelled"]:
+        raise HTTPException(400, "이 데이터셋에는 아직 라벨이 없어요")
+    # checked before anything is written: a run that cannot start must not be queued
+    epochs, imgsz, batch = _run_shape(payload)
+    note = _ensure_split(dataset, float(payload.get("val_ratio", 0.2)))
+    job_id = db.add_job(
+        kind="train",
+        detail=note,
+        dataset_id=dataset["id"],
+        model=_resolve_model(payload.get("model", "ed-s")),
+        epochs=epochs,
+        imgsz=imgsz,
+        batch=batch,
+        freeze=payload.get("freeze") or None,
+        patience=_patience(payload.get("patience")),
+        augment=None if payload.get("augment") is None else int(bool(payload["augment"])),
+        device=payload.get("device") or None,
+        int8=1 if payload.get("int8") else None,
+        **_optimizer_settings(payload),
+        **_decoder_settings(payload),
+    )
+    return {"id": job_id}
+
+
+#: Input sizes a run may ask for: the network halves its input five times, so
+#: a size must divide by 32; past 2048 a picture no longer fits a training batch.
+IMGSZ_RANGE = (32, 2048)
+#: More epochs or a bigger batch than this is a typo, not a plan.
+MAX_EPOCHS, MAX_BATCH = 10000, 1024
+
+
+def _whole(payload: dict, key: str, default: int, label: str) -> int:
+    value = payload.get(key, default)
+    if value in (None, ""):
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{label}: 정수로 적어 주세요") from None
+    if not number.is_integer():
+        raise HTTPException(400, f"{label}: 정수로 적어 주세요")
+    return int(number)
+
+
+def _run_shape(payload: dict) -> tuple[int, int, int]:
+    """A training run's epochs, input size and batch, refused when they cannot work.
+
+    A negative or zero epoch count used to be queued and fail inside the
+    trainer a minute later; the form says why now, before anything is written.
+    """
+    epochs = _whole(payload, "epochs", 50, "에폭")
+    if not 1 <= epochs <= MAX_EPOCHS:
+        raise HTTPException(400, f"에폭은 1에서 {MAX_EPOCHS} 사이여야 해요")
+    batch = _whole(payload, "batch", 4, "배치")
+    if not 1 <= batch <= MAX_BATCH:
+        raise HTTPException(400, f"배치는 1에서 {MAX_BATCH} 사이여야 해요")
+    imgsz = _whole(payload, "imgsz", 640, "입력 크기")
+    low, high = IMGSZ_RANGE
+    if imgsz % 32 or not low <= imgsz <= high:
+        raise HTTPException(400, f"입력 크기는 32의 배수로, {low}에서 {high} 사이여야 해요")
+    return epochs, imgsz, batch
+
+
+#: Optimizer settings a run may set, with the range each must fall in. Left
+#: out (or empty), easydetect decides: the learning rate from the batch size,
+#: the backbone's share from the model size, and its own defaults for the rest.
+OPTIMIZER_SETTINGS = {
+    "lr": (float, 1e-7, 1e-2),
+    "lr_backbone_mult": (float, 0.0, 1.0),
+    "weight_decay": (float, 0.0, 1.0),
+    "warmup_epochs": (float, 0.0, 1000.0),
+    "seed": (int, 0, 2**31 - 1),
+}
+
+
+def _optimizer_settings(payload: dict) -> dict:
+    out = {}
+    for key, (kind, low, high) in OPTIMIZER_SETTINGS.items():
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            value = kind(value)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"{key}은(는) 숫자여야 해요") from None
+        if not low <= value <= high:
+            raise HTTPException(400, f"{key}은(는) {low:g}에서 {high:g} 사이여야 해요")
+        out[key] = value
+    if payload.get("amp") is not None:
+        out["amp"] = int(bool(payload["amp"]))
+    return out
+
+
+#: Decoder queries a run may train with, and how many denoising queries (both
+#: training-time costs: on a CPU most of a step goes to them, not to the picture).
+#: Left out, the model keeps its own (300 and 100). The model keeps ``queries``
+#: after training, so the exported file runs with that many too.
+DECODER_SETTINGS = {"queries": (10, 300, "쿼리 수"), "denoising": (0, 100, "디노이징 쿼리")}
+
+
+def _decoder_settings(payload: dict) -> dict:
+    out = {}
+    for key, (low, high, label) in DECODER_SETTINGS.items():
+        if payload.get(key) in (None, ""):
+            continue
+        value = _whole(payload, key, 0, label)
+        if not low <= value <= high:
+            raise HTTPException(400, f"{label}는 {low}에서 {high} 사이여야 해요")
+        out[key] = value
+    return out
+
+
+def _patience(value) -> int | None:
+    """Epochs without a better mAP before the run stops; 0 means run them all."""
+    if value in (None, ""):
+        return None                       # the trainer's own default
+    value = int(value)
+    if value < 0:
+        raise HTTPException(400, "patience는 0(끄기) 이상이어야 해요")
+    return value
+
+
+@app.get("/api/jobs")
+def list_jobs():
+    # LEFT JOIN: an inference job over a folder or an uploaded video belongs to
+    # no dataset, and an inner join would drop it out of the list entirely
+    return [_split_detail(job) for job in db.query(
+        "SELECT j.*, d.name AS dataset FROM jobs j"
+        " LEFT JOIN datasets d ON d.id = j.dataset_id ORDER BY j.id DESC"
+    )]
+
+
+def _split_detail(job: dict) -> dict:
+    """A failure in one line, and the log it came with apart in ``log_tail``.
+
+    Rows written before ``log_tail`` existed carry both in ``detail``,
+    joined by " — " and the log's lines by " / "; they are split the same way.
+    """
+    detail = job.get("detail") or ""
+    if job.get("status") == "failed" and not job.get("log_tail") and " — " in detail:
+        head, tail = detail.split(" — ", 1)
+        job["detail"], job["log_tail"] = head, tail.replace(" / ", "\n")
+    return job
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: int):
+    job = db.one(
+        "SELECT j.*, d.name AS dataset FROM jobs j"
+        " LEFT JOIN datasets d ON d.id = j.dataset_id WHERE j.id = ?",
+        (job_id,),
+    )
+    if job is None:
+        raise HTTPException(404, "그런 작업이 없어요")
+    _split_detail(job)
+    job["epochs_done"] = db.query(
+        "SELECT epoch, loss, map50_95, seconds FROM epochs WHERE job_id = ? ORDER BY epoch",
+        (job_id,),
+    )
+    job["artifacts"] = _artifacts(job)
+    job["files"] = _model_files(job)
+    job["run"] = _run_summary(job)
+    return job
+
+
+def _run_summary(job: dict) -> dict:
+    """The run's setup and, once it is over, how it went — for the job's info panel."""
+    if job["kind"] != "train" or not job.get("run_dir"):
+        return {}
+    run_dir = Path(job["run_dir"])
+    record = _run_record(run_dir)
+    summary = run_dir / "summary.json"
+    if summary.exists():
+        try:
+            done = json.loads(summary.read_text(encoding="utf-8"))
+            outcome = ("best_epoch", "stopped_early", "epoch_seconds", "final")
+            record = dict(done.get("run") or record, **{k: done.get(k) for k in outcome})
+        except ValueError:
+            pass
+    return record
+
+
+def _model_files(job: dict) -> dict:
+    """Where a run's model sits on disk, for the copy-and-run snippets."""
+    if not job.get("run_dir"):
+        return {}
+    run_dir = Path(job["run_dir"]).resolve()
+    files = {}
+    if (run_dir / "weights" / "best.pt").exists():
+        files["weights"] = str(run_dir / "weights" / "best.pt")
+    xml = _main_ir(run_dir)
+    if xml is not None:
+        files["ir"] = str(xml)
+    int8 = run_dir / "openvino" / f"{xml.stem}_int8.xml" if xml is not None else None
+    if int8 is not None and int8.exists():
+        files["ir_int8"] = str(int8)
+    return files
+
+
+def _main_ir(run_dir: Path) -> Path | None:
+    """The run's full-precision IR. An INT8 one (``best_int8.xml``) may sit
+    beside it, and is only ever used when asked for by name."""
+    found = sorted((Path(run_dir) / "openvino").glob("*.xml"))
+    return next((x for x in found if not x.stem.endswith("_int8")), None)
+
+
+@app.post("/api/jobs/{job_id}/resume")
+def resume_job(job_id: int, payload: dict = None):
+    """Pick a run back up where it left off, and give it more epochs to use.
+
+    Resuming with the schedule it already finished would do nothing, so the
+    default is to extend it.
+    """
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or job["kind"] != "train":
+        raise HTTPException(404, "그런 학습 작업이 없어요")
+    if job["status"] in ("queued", "running", "exporting"):
+        raise HTTPException(400, "작업이 아직 돌고 있어요")
+    root = job["resume_of"] or job_id
+    if not (RUNS / f"job{root}" / "weights" / "last.pt").exists():
+        raise HTTPException(400, "이어서 학습할 last.pt가 없어요")
+    add = _whole(payload or {}, "add_epochs", 10, "더 할 에폭")
+    if not 1 <= add <= MAX_EPOCHS:
+        raise HTTPException(400, f"더 할 에폭은 1에서 {MAX_EPOCHS} 사이여야 해요")
+    new_id = db.add_job(
+        kind="train",
+        resume_of=root,
+        dataset_id=job["dataset_id"],
+        model=job["model"],
+        epochs=job["epochs"] + max(add, 1),
+        imgsz=job["imgsz"],
+        batch=job["batch"],
+        freeze=job["freeze"],
+        patience=job["patience"],
+        augment=job["augment"],
+        device=job["device"],
+        int8=job["int8"],
+        **{key: job[key] for key in (*OPTIMIZER_SETTINGS, "amp", *DECODER_SETTINGS)},
+        detail=f"#{root} 이어서 +{max(add, 1)}에폭",
+    )
+    return {"id": new_id}
+
+
+@app.post("/api/jobs/{job_id}/evaluate")
+def evaluate_job(job_id: int, payload: dict = None):
+    """Queue a scoring pass over the validation split, with pictures."""
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or not job["run_dir"]:
+        raise HTTPException(404, "이 작업에는 가중치가 없어요")
+    new_id = db.add_job(
+        kind="evaluate",
+        resume_of=job_id,
+        dataset_id=job["dataset_id"],
+        model=job["model"],
+        conf=float((payload or {}).get("conf", 0.5)),
+    )
+    return {"id": new_id}
+
+
+@app.get("/api/jobs/{job_id}/report")
+def job_report(job_id: int):
+    """The evaluation report, if this run has one."""
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or not job["run_dir"]:
+        raise HTTPException(404, "그런 작업이 없어요")
+    report = Path(job["run_dir"]) / "eval" / "report.json"
+    if not report.exists():
+        raise HTTPException(404, "아직 평가하지 않았어요")
+    return json.loads(report.read_text(encoding="utf-8"))
+
+
+@app.get("/api/jobs/{job_id}/predictions")
+def job_predictions(job_id: int, limit: int = 60):
+    """What an inference run found: totals per class, and the first drawn frames.
+
+    Read from the frames on disk while it runs, and from results.json once done.
+    """
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or job["kind"] != "predict" or not job["run_dir"]:
+        raise HTTPException(404, "추론 결과가 없어요")
+    run_dir = Path(job["run_dir"])
+    results = run_dir / "results.json"
+    if results.exists():
+        records = json.loads(results.read_text(encoding="utf-8"))
+        per_class: dict[str, int] = {}
+        for record in records:
+            for box in record["boxes"]:
+                per_class[box["name"]] = per_class.get(box["name"], 0) + 1
+        files = [{"file": r["file"], "boxes": len(r["boxes"])} for r in records]
+    else:  # still running: whatever has been drawn so far
+        per_class = {}
+        drawn = sorted((run_dir / "images").glob("*.jpg"))
+        files = [{"file": f.name, "boxes": None} for f in drawn]
+    return {
+        "total": len(files),
+        "boxes": sum(per_class.values()),
+        "per_class": dict(sorted(per_class.items(), key=lambda kv: -kv[1])),
+        "files": files[: max(int(limit), 0)],
+    }
+
+
+@app.get("/api/jobs/{job_id}/output/{name}")
+def job_output(job_id: int, name: str):
+    """One drawn frame from an inference run."""
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or not job["run_dir"]:
+        raise HTTPException(404, "그런 작업이 없어요")
+    folder = (Path(job["run_dir"]) / "images").resolve()
+    path = (folder / name).resolve()
+    if not path.is_file() or not path.is_relative_to(folder):
+        raise HTTPException(404, "그런 이미지가 없어요")
+    return FileResponse(path)
+
+
+@app.get("/api/jobs/{job_id}/eval/{name}")
+def eval_image(job_id: int, name: str):
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or not job["run_dir"]:
+        raise HTTPException(404, "그런 작업이 없어요")
+    path = (Path(job["run_dir"]) / "eval" / name).resolve()
+    if not path.is_file() or not path.is_relative_to(Path(job["run_dir"]).resolve()):
+        raise HTTPException(404, "그런 이미지가 없어요")
+    return FileResponse(path)
+
+
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: int):
+    """Forget a job, what was built on it, and the files nothing else uses.
+
+    Deleting a training run takes its continuations ("이어서 학습") and its
+    evaluations with it: they live in the same folder and mean nothing
+    without it. Deleting only a continuation keeps the folder for the run
+    it continued. A registered model inside the folder still has to be
+    removed first, and nothing is deleted while any of it is running.
+    """
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None:
+        raise HTTPException(404, "그런 작업이 없어요")
+    ids = [job_id]
+    if job["kind"] == "train":                 # everything resumed or scored from it, any depth
+        frontier = [job_id]
+        while frontier:
+            marks = ",".join("?" * len(frontier))
+            frontier = [row["id"] for row in db.query(
+                f"SELECT id FROM jobs WHERE resume_of IN ({marks})", tuple(frontier))
+                if row["id"] not in ids]
+            ids += frontier
+    marks = ",".join("?" * len(ids))
+    going = [row["id"] for row in db.query(
+        f"SELECT id FROM jobs WHERE id IN ({marks}) AND status IN ('running', 'exporting')",
+        tuple(ids))]
+    if going:
+        raise HTTPException(400, f"#{going[0]}이(가) 아직 돌고 있어요. 먼저 멈춰 주세요")
+
+    run_dir = Path(job["run_dir"]) if job["run_dir"] and job["kind"] in ("train", "predict") \
+        else None
+    # the folder goes only when no job outside this set still points at it
+    removes = run_dir is not None and not db.query(
+        f"SELECT id FROM jobs WHERE run_dir = ? AND id NOT IN ({marks})", (str(run_dir), *ids))
+    if removes:
+        for model in db.query("SELECT name, path FROM models"):
+            if Path(model["path"]).resolve().is_relative_to(run_dir.resolve()):
+                raise HTTPException(400, f"등록한 모델 '{model['name']}'이(가) 이 결과를 써요."
+                                         " 모델 탭에서 먼저 빼 주세요")
+    removed = False
+    if removes and run_dir.resolve().is_relative_to(RUNS.resolve()) and run_dir.is_dir():
+        shutil.rmtree(run_dir, ignore_errors=True)   # only ever inside the lab's runs/
+        removed = True
+    for gone in ids:
+        (RUNS / f"job{gone}-failed.log").unlink(missing_ok=True)
+        db.execute("DELETE FROM epochs WHERE job_id = ?", (gone,))
+        db.execute("DELETE FROM jobs WHERE id = ?", (gone,))
+    return {"deleted": True, "jobs": ids, "files_removed": removed}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: int):
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None:
+        raise HTTPException(404, "그런 작업이 없어요")
+    if job["status"] == "queued" and db.change(
+            "UPDATE jobs SET status = 'cancelled', finished = ? WHERE id = ? AND status = 'queued'",
+            (time.time(), job_id)):
+        return {"status": "cancelled"}
+    job = db.one("SELECT status FROM jobs WHERE id = ?", (job_id,))   # the worker took it
+    if job is None:
+        raise HTTPException(404, "그런 작업이 없어요")
+    if job["status"] == "running":
+        worker.cancel(job_id)  # stops at the next epoch or image
+    elif job["status"] == "exporting":
+        # the training is over and the export is a few seconds; stopping here
+        # would only leave half an IR behind
+        return {"status": "exporting", "detail": "이미 학습은 끝났고 내보내는 중입니다"}
+    return {"status": "cancelling"}
+
+
+@app.get("/api/jobs/{job_id}/stream")
+def stream_job(job_id: int):
+    """Server-sent events: progress as it happens, then a final status.
+
+    An async generator: a page left open on a long run would otherwise hold a
+    worker thread asleep for hours, and a few tabs would use up the pool that
+    every plain ``def`` endpoint runs in. Only the two queries borrow a thread.
+    """
+
+    async def events():
+        sent, last = 0, None
+        while True:
+            job = await run_in_threadpool(db.one, "SELECT * FROM jobs WHERE id = ?", (job_id,))
+            if job is None:
+                return
+            rows = await run_in_threadpool(
+                db.query,
+                "SELECT epoch, loss, map50_95 FROM epochs WHERE job_id = ? AND epoch > ?"
+                " ORDER BY epoch",
+                (job_id, sent),
+            )
+            for row in rows:
+                sent = row["epoch"]
+                yield f"data: {json.dumps({'type': 'epoch', **row})}\n\n"
+            state = (job["progress"], job["detail"], job["status"])
+            if state != last:  # the text moves inside an epoch even when progress does not
+                last = state
+                event = {"type": "progress", "value": job["progress"],
+                         "detail": job["detail"], "status": job["status"]}
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if job["status"] in ("done", "failed", "cancelled"):
+                yield f"data: {json.dumps({'type': 'end', 'status': job['status']})}\n\n"
+                return
+            yield ": keepalive\n\n"
+            await asyncio.sleep(STREAM_POLL)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.get("/api/jobs/{job_id}/download/{kind}")
+def download(job_id: int, kind: str, repo: str | None = None, folder: str | None = None,
+             pt: bool = False):
+    folder_in_repo = folder
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or not job["run_dir"]:
+        raise HTTPException(404, "아직 받을 파일이 없어요")
+    run_dir = Path(job["run_dir"])
+    if kind == "weights":
+        path = run_dir / "weights" / "best.pt"
+        if not path.exists():
+            raise HTTPException(404, "가중치가 없어요")
+        return FileResponse(path, filename=f"job{job_id}-best.pt")
+    if kind in ("openvino", "onnx"):
+        # one export folder holds both: the IR (.xml + .bin) and the .onnx it was
+        # converted from; each zip takes its own model files and the class names
+        # (the IR zip best_int8.xml + .bin too, when the run asked for one)
+        model_files = (".xml", ".bin") if kind == "openvino" else (".onnx",)
+        files = [p for p in sorted((run_dir / "openvino").glob("*"))
+                 if p.suffix in model_files or p.name == "labels.txt"
+                 or p.name.endswith(".names.json") or p.name in SIBLING_MODELS]
+        if not any(p.suffix in model_files for p in files):
+            raise HTTPException(
+                404, "내보낸 IR이 없어요" if kind == "openvino" else "내보낸 ONNX가 없어요")
+        archive = run_dir / f"job{job_id}-{kind}.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for p in files:
+                bundle.write(p, p.name)
+            if job["kind"] == "train":       # the card travels with the model
+                bundle.writestr("README.md", _card(job, repo, folder_in_repo,
+                                                   [p.name for p in files]))
+        return FileResponse(archive, filename=f"job{job_id}-{kind}.zip")
+    if kind == "pibo":
+        return _pibo_model(job, run_dir)
+    if kind == "huggingface":
+        return _hub_bundle(job, repo, folder_in_repo, pt)
+    if kind == "results":
+        path = run_dir / "results.csv"
+        if not path.exists():
+            raise HTTPException(404, "아직 결과가 없어요")
+        return FileResponse(path, filename=f"job{job_id}-results.csv")
+    if kind == "predictions":
+        folder = run_dir / "images"
+        if not folder.is_dir():
+            raise HTTPException(404, "추론 결과가 없어요")
+        shutil.copy2(run_dir / "results.json", folder / "results.json")
+        archive = shutil.make_archive(str(run_dir / f"job{job_id}-predictions"), "zip", folder)
+        return FileResponse(archive, filename=f"job{job_id}-predictions.zip")
+    if kind == "video":
+        path = run_dir / "annotated.mp4"
+        if not path.exists():
+            raise HTTPException(404, "결과 영상이 없어요")
+        return FileResponse(path, filename=f"job{job_id}-annotated.mp4")
+    if kind == "log":
+        path = run_dir / "train.log"
+        if not path.exists():
+            raise HTTPException(404, "로그가 없어요")
+        return FileResponse(path, filename=f"job{job_id}-train.log", media_type="text/plain")
+    raise HTTPException(404, "모르는 파일 종류예요")
+
+
+def _pibo_model(job: dict, run_dir: Path):
+    """"Pibo로 보내기": one .onnx with the class names and the score threshold
+    inside it — what the robot loads in place of its COCO model."""
+    import pibo_export
+
+    if job["kind"] != "train" or not (run_dir / "weights" / "best.pt").exists():
+        raise HTTPException(404, "가중치가 없어요")
+    try:
+        dataset = db.one("SELECT path FROM datasets WHERE id = ?", (job["dataset_id"],))
+        data_yaml = Path(dataset["path"]) / "data.yaml" if dataset else None
+        archive = pibo_export.build(job, run_dir, data_yaml)
+    except Exception as exc:  # a broken checkpoint, a full disk: say which
+        raise HTTPException(500, f"Pibo용 모델 파일을 만들지 못했어요: {exc}") from exc
+    return FileResponse(archive, filename=archive.name, media_type="application/octet-stream")
+
+
+# ---------------------------------------------------------------- Hugging Face
+
+
+def _hub_repo() -> str:
+    """The repo this install downloads its weights from — the natural place to share more."""
+    from easydetect.downloads import assets_url
+
+    found = re.search(r"huggingface\.co/([^/]+/[^/]+)/resolve", assets_url())
+    return found.group(1) if found else "your-name/easydetect-models"
+
+
+def _hub_folder(job: dict) -> str:
+    dataset = db.one("SELECT name FROM datasets WHERE id = ?", (job["dataset_id"],))
+    return "models/" + slug(dataset["name"] if dataset else "", f"job{job['id']}")
+
+
+def _card_facts(job: dict, repo: str, folder: str, files: list[str]) -> dict:
+    """Everything the card says, read back from the run — never typed in."""
+    run_dir = Path(job["run_dir"])
+    summary = {}
+    if (run_dir / "summary.json").exists():
+        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    log = (run_dir / "train.log").read_text(encoding="utf-8", errors="replace") \
+        if (run_dir / "train.log").exists() else ""
+
+    named = sorted(summary.get("names", {}).items(), key=lambda kv: int(kv[0]))
+    variant, names = None, [v for _, v in named]
+    model = str(job["model"])
+    if re.fullmatch(r"ed-[nsmlx]", model):
+        variant = model.rsplit("-", 1)[-1]
+    weights = run_dir / "weights" / "best.pt"
+    if (variant is None or not names) and weights.exists():
+        try:
+            from easydetect.utils.checkpoint import load_checkpoint
+
+            ckpt = load_checkpoint(weights)
+            variant = variant or ckpt.get("variant")
+            names = names or [v for _, v in sorted(ckpt.get("names", {}).items())]
+        except Exception:  # noqa: BLE001 — a card with less in it beats no card
+            pass
+
+    run = summary.get("run") or _run_record(run_dir)
+    variant = run.get("variant") or variant
+    origin = run.get("start") or {}
+    if Path(model).suffix in (".pt", ".xml", ".onnx"):
+        weights_dir = Path(model).parent.name == "weights"   # runs/jobN/weights/best.pt -> jobN
+        start = Path(model).parent.parent.name if weights_dir else Path(model).name
+    elif origin.get("kind") in ("coco", "imagenet", "scratch"):
+        start = origin["kind"]
+    else:                                   # a run from before run.json: read the log
+        start = "imagenet" if "loaded ImageNet backbone" in log else "coco"
+    device = re.search(r"training on (\S+?),", log)
+    device = run.get("gpu") or (device.group(1) if device else None)
+    gpu = _gpu()
+    if device and device.startswith("cuda") and gpu:
+        device = gpu["name"]
+    images = re.search(r"training on \S+?, (\d+) images", log)
+
+    dataset = db.one("SELECT * FROM datasets WHERE id = ?", (job["dataset_id"],))
+    boxes = {}
+    if dataset:
+        try:
+            boxes = {c["name"]: c["boxes"] for c in dataset_stats(dataset["id"])["per_class"]}
+        except HTTPException:
+            pass
+    rows = db.query("SELECT epoch, loss, map50_95 FROM epochs WHERE job_id = ? ORDER BY epoch",
+                    (job["id"],))
+    scored = [r for r in rows if r["map50_95"] is not None]
+    report = run_dir / "eval" / "report.json"
+    report = json.loads(report.read_text(encoding="utf-8")) if report.exists() else {}
+
+    import easydetect
+
+    return {
+        "title": dataset["name"] if dataset else f"job{job['id']}",
+        "repo": repo, "folder": folder, "files": files,
+        "variant": variant, "names": names,
+        "imgsz": summary.get("imgsz") or job.get("imgsz"),
+        "epochs": job.get("epochs"), "epochs_run": summary.get("epochs_run"),
+        "best_epoch": max(scored, key=lambda r: r["map50_95"])["epoch"] if scored else None,
+        "batch": job.get("batch"), "freeze": job.get("freeze"),
+        "start": start, "device": device,
+        "train_images": int(images.group(1)) if images else None,
+        "dataset_images": dataset["images"] if dataset else None,
+        "map50_95": summary.get("best_map50_95", job.get("best_map")),
+        "map50": report.get("map50"),
+        "per_class_ap": {c["name"]: c["ap50_95"] for c in report.get("per_class", [])},
+        "boxes": boxes,
+        "seconds": job["finished"] - job["started"]
+        if job.get("finished") and job.get("started") else None,
+        "date": time.strftime("%Y-%m-%d", time.localtime(job.get("finished") or time.time())),
+        "version": (run.get("versions") or {}).get("easydetect") or easydetect.__version__,
+        "curve": rows,
+        "run": run,
+        "stopped_early": summary.get("stopped_early"),
+        "final": summary.get("final"),
+        "epoch_seconds": summary.get("epoch_seconds"),
+    }
+
+
+def _run_record(run_dir: Path) -> dict:
+    """``run.json`` — how the trainer was set up; there from the first batch on."""
+    path = run_dir / "run.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except ValueError:                      # half-written while we read it
+        return {}
+
+
+def _card(job: dict, repo: str | None, folder: str | None, files: list[str]) -> str:
+    return model_card(_card_facts(job, repo or _hub_repo(), folder or _hub_folder(job), files))
+
+
+def _hub_files(job: dict, pt: bool) -> list[Path]:
+    run_dir = Path(job["run_dir"])
+    wanted = [p for p in sorted((run_dir / "openvino").glob("*"))
+              if p.suffix in (".xml", ".bin", ".onnx") or p.name == "labels.txt"
+              or p.name.endswith(".names.json")]
+    if pt and (run_dir / "weights" / "best.pt").exists():
+        wanted.append(run_dir / "weights" / "best.pt")
+    return wanted
+
+
+def _hub_bundle(job: dict, repo: str | None, folder: str | None, pt: bool):
+    """The folder to upload as it is: IR, ONNX, labels, the card — and best.pt if asked."""
+    if job["kind"] != "train":
+        raise HTTPException(400, "공유할 모델은 학습 작업에만 있어요")
+    files = _hub_files(job, pt)
+    if not any(p.suffix == ".xml" for p in files):
+        raise HTTPException(404, "내보낸 IR이 없어요. 내보내기가 실패했거나 아직 학습 중이에요")
+    folder = folder or _hub_folder(job)
+    name = folder.strip("/").rsplit("/", 1)[-1] or f"job{job['id']}"
+    archive = Path(job["run_dir"]) / f"{name}.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for path in files:
+            bundle.write(path, f"{name}/{path.name}")
+        bundle.writestr(f"{name}/README.md", _card(job, repo, folder, [p.name for p in files]))
+    return FileResponse(archive, filename=archive.name)
+
+
+@app.get("/api/jobs/{job_id}/modelcard")
+def job_modelcard(job_id: int, repo: str | None = None, folder: str | None = None,
+                  pt: bool = False):
+    """The README.md a Hugging Face upload of this run would carry, plus where it would go."""
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or job["kind"] != "train" or not job["run_dir"]:
+        raise HTTPException(404, "학습한 모델이 없어요")
+    folder = folder or _hub_folder(job)
+    files = [p.name for p in _hub_files(job, pt)]
+    return {"repo": repo or _hub_repo(), "folder": folder, "files": files + ["README.md"],
+            "readme": _card(job, repo, folder, files)}
+
+
+# The two below are plain ``def``s on purpose: FastAPI runs them in a worker
+# thread. As ``async def`` the inference ran on the event loop, and every other
+# request — the next webcam frame, the progress stream — waited behind it.
+
+
+@app.post("/api/jobs/{job_id}/predict")
+def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)):
+    """Try the trained model on one image; returns the annotated JPEG."""
+    import cv2
+
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    if job is None or not job["run_dir"]:
+        raise HTTPException(404, "이 작업에는 가중치가 없어요")
+    frame = _decode_upload(image)
+
+    xml = _main_ir(Path(job["run_dir"]))
+    weights = str(xml or Path(job["run_dir"]) / "weights" / "best.pt")
+    model = _model(weights, _run_task(job["run_dir"]))
+    with _using(model):
+        result = model(frame, conf=conf)[0]
+    ok, buffer = cv2.imencode(".jpg", result.plot())
+    if not ok:
+        raise HTTPException(500, "결과 이미지를 만들지 못했어요")
+    return StreamingResponse(
+        io.BytesIO(buffer.tobytes()),
+        media_type="image/jpeg",
+        headers={"X-Detections": json.dumps(result.summary(), ensure_ascii=False)},
+    )
+
+
+@app.post("/api/preview")
+def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile = None,
+            iou: str = Form(None), contain: str = Form(None), segment: str = Form(None),
+            task: str = Form(None)):
+    """One frame in, one annotated frame out — what the webcam preview posts to."""
+    filters = _box_filters(iou, contain)
+    import cv2
+
+    frame = _decode_upload(image)
+    name = _resolve_model(model)
+    try:
+        loaded = _model(name, _task(segment, task))
+        with _using(loaded):
+            result = loaded(frame, conf=conf, verbose=False, **filters)[0]
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
+    ok, buffer = cv2.imencode(".jpg", result.plot(), [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise HTTPException(500, "결과 이미지를 만들지 못했어요")
+    return StreamingResponse(
+        io.BytesIO(buffer.tobytes()),
+        media_type="image/jpeg",
+        headers={"X-Detections": json.dumps(result.summary(), ensure_ascii=False)},
+    )
+
+
+@app.get("/api/status")
+def status():
+    return {
+        "gpu": _gpu(),
+        "https_port": int(os.environ.get("EASYDETECT_HTTPS_PORT") or 0) or None,
+        "running_job": worker.current,
+        "queued": len(db.query("SELECT id FROM jobs WHERE status = 'queued'")),
+        "datasets": len(db.query("SELECT id FROM datasets")),
+        "max_upload_mb": MAX_UPLOAD_MB,
+    }
+
+
+@app.get("/api/gpu")
+def gpu_now():
+    """Utilisation, memory, temperature and power of each NVIDIA GPU, right now.
+
+    From nvidia-smi, which comes with the driver — no extra package. None when
+    there is no NVIDIA GPU or no driver; the page then shows nothing.
+    """
+    return {"gpus": _gpu_now()}
+
+
+_GPU_FIELDS = ("index", "name", "utilization.gpu", "memory.used", "memory.total",
+               "temperature.gpu", "power.draw", "power.limit")
+_gpu_cache: dict = {"at": 0.0, "value": None}
+
+
+def _gpu_now() -> list[dict] | None:
+    # several tabs poll this; one nvidia-smi a second is plenty
+    if time.time() - _gpu_cache["at"] < 1.0:
+        return _gpu_cache["value"]
+    value = None
+    smi = shutil.which("nvidia-smi")
+    if smi:
+        try:
+            out = subprocess.run(
+                [smi, f"--query-gpu={','.join(_GPU_FIELDS)}", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=3, check=True,
+            ).stdout
+            value = [_gpu_row(line) for line in out.strip().splitlines() if line.strip()]
+        except (OSError, subprocess.SubprocessError, ValueError):
+            value = None
+    _gpu_cache.update(at=time.time(), value=value)
+    return value
+
+
+def _gpu_row(line: str) -> dict:
+    cells = [c.strip() for c in line.split(",")]
+    number = lambda s: float(s) if s not in ("", "[N/A]", "N/A", "[Not Supported]") else None  # noqa: E731
+    row = dict(zip(_GPU_FIELDS, cells, strict=True))
+    return {
+        "index": int(row["index"]),
+        "name": row["name"],
+        "util": number(row["utilization.gpu"]),
+        "mem_used_mb": number(row["memory.used"]),
+        "mem_total_mb": number(row["memory.total"]),
+        "temp_c": number(row["temperature.gpu"]),
+        "power_w": number(row["power.draw"]),
+        "power_limit_w": number(row["power.limit"]),
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def _gpu() -> dict | None:
+    """The CUDA card training will use, if any — asked once, then remembered."""
+    try:
+        import torch
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    props = torch.cuda.get_device_properties(0)
+    return {"name": props.name, "memory_gb": round(props.total_memory / 2**30)}
+
+
+@app.exception_handler(HTTPException)
+def http_error(_request, exc: HTTPException):
+    return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+
+# ------------------------------------------------------------------ helpers
+
+
+def _decode_upload(image: UploadFile | None):
+    """An uploaded picture as a BGR array, or a 400 saying why not."""
+    import cv2
+    import numpy as np
+
+    if image is None:
+        raise HTTPException(400, "올린 이미지가 없어요")
+    frame = cv2.imdecode(np.frombuffer(image.file.read(), np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "이미지를 읽지 못했어요")
+    return frame
+
+
+def _collection_target(name: str, dataset_id: int | None) -> tuple[Path, dict | None]:
+    """Where new images go: into an existing dataset, or into a fresh folder."""
+    if dataset_id:
+        dataset = _dataset(dataset_id)
+        return Path(dataset["images_dir"]), dataset
+    target = _fresh_dir(DATASETS, name) / "images"
+    target.mkdir(parents=True)
+    return target, None
+
+
+def _finish_collection(name: str, target: Path, dataset: dict | None, **counts) -> dict:
+    """Register a new dataset, or refresh the counts of the one we added to."""
+    if dataset is None:
+        return {**_register(name, target.parent), **counts}
+    _forget_images(dataset["id"])
+    worker.refresh_counts(dataset["id"])
+    updated = _dataset(dataset["id"])
+    return {
+        "id": dataset["id"],
+        "images": updated["images"],
+        "labelled": updated["labelled"],
+        "classes": json.loads(updated["classes"]),
+        **counts,
+    }
+
+
+def _discard(target: Path, dataset: dict | None) -> None:
+    """Undo a half-made dataset; never touch one that already existed."""
+    if dataset is None and target.parent.parent == DATASETS:
+        shutil.rmtree(target.parent, ignore_errors=True)
+
+
+def _unique(path: Path) -> Path:
+    """Keep a second upload of "frame.jpg" from overwriting the first."""
+    if not path.exists():
+        return path
+    for i in range(2, 10000):
+        candidate = path.with_name(f"{path.stem}_{i}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise HTTPException(400, f"이름이 {path.name}인 파일이 너무 많아요")
+
+
+def _dataset(dataset_id) -> dict:
+    dataset = db.one("SELECT * FROM datasets WHERE id = ?", (dataset_id,))
+    if dataset is None:
+        raise HTTPException(404, "그런 데이터셋이 없어요")
+    return dataset
+
+
+def _label_file(dataset_id: int, index: int, name: str | None = None) -> Path:
+    return label_path(_image_at(_dataset(dataset_id), index, name))
+
+
+def _image_at(dataset: dict, index: int, name: str | None = None) -> Path:
+    """The picture at ``index`` — and, given its ``name``, only if it still is that one."""
+    images = _images(dataset)
+    if not 0 <= index < len(images):
+        raise HTTPException(404, "그런 이미지가 없어요")
+    image = images[index]
+    if name is not None and image.relative_to(dataset["images_dir"]).as_posix() != name:
+        raise HTTPException(409, "사진 목록이 바뀌었어요. 페이지를 새로 고쳐 주세요")
+    return image
+
+
+#: dataset id -> (images root, mtime of every folder under it, the sorted list)
+_image_lists: dict[int, tuple[str, dict[str, int], list[Path]]] = {}
+_image_lists_lock = threading.Lock()
+#: a folder changed this recently may change again within the same mtime tick
+#: (two seconds on FAT), so a listing of it is not trusted to stay current
+_SETTLED_NS = 2_000_000_000
+
+
+def _images(dataset: dict) -> list[Path]:
+    """``list_images`` of the dataset's pictures, kept between requests.
+
+    Every image, label and auto-label request addresses a picture by its index
+    in this list, and walking a 10,000-picture folder for each took 170 ms.
+    The list is kept per dataset and re-read when the app adds or removes
+    pictures (:func:`_forget_images`) or when any folder under the root has a
+    new mtime — a file copied in from outside — which costs one stat per
+    folder rather than one per picture.
+    """
+    root = str(dataset["images_dir"])
+    with _image_lists_lock:
+        cached = _image_lists.get(dataset["id"])
+    if cached is not None and cached[0] == root and _folders_unchanged(cached[1]):
+        return list(cached[2])
+    started = time.time_ns()
+    images, folders = _scan_images(Path(root))
+    stamps = {}
+    for folder in folders:
+        try:
+            stamps[folder] = os.stat(folder).st_mtime_ns
+        except OSError:
+            return images          # a folder went away mid-walk: answer, but keep nothing
+    if all(mtime < started - _SETTLED_NS for mtime in stamps.values()):
+        with _image_lists_lock:
+            _image_lists[dataset["id"]] = (root, stamps, images)
+    return list(images)
+
+
+def _scan_images(root: Path) -> tuple[list[Path], list[str]]:
+    """``labeling.list_images(root)``, and every folder it walked through."""
+    images, folders = [], []
+    for here, _, files in os.walk(root):   # like rglob: symlinked folders not entered
+        folders.append(here)
+        images += [Path(here, f) for f in files if Path(f).suffix.lower() in IMG_SUFFIXES]
+    return sorted(images), folders
+
+
+def _folders_unchanged(stamps: dict[str, int]) -> bool:
+    try:
+        return all(os.stat(folder).st_mtime_ns == mtime for folder, mtime in stamps.items())
+    except OSError:
+        return False
+
+
+def _forget_images(dataset_id: int) -> None:
+    with _image_lists_lock:
+        _image_lists.pop(dataset_id, None)
+
+
+def _save_upload(upload: UploadFile, destination: Path) -> None:
+    """An upload onto disk a megabyte at a time, never whole in memory.
+
+    By the time an endpoint runs, the server has already spooled the upload to
+    a temporary file; this copies it across from there.
+    """
+    upload.file.seek(0)
+    with open(destination, "wb") as out:
+        shutil.copyfileobj(upload.file, out, 1 << 20)
+
+
+def _default_model(dataset_id: int) -> str:
+    """What to pre-label a dataset with when nobody said: its own latest run.
+
+    A COCO model knows 80 everyday classes and nothing called Paper or Rock;
+    once a dataset has been trained on, that run is the one that can draft it.
+    """
+    run = db.one(
+        "SELECT run_dir FROM jobs WHERE dataset_id = ? AND kind = 'train' AND status = 'done'"
+        " AND run_dir IS NOT NULL ORDER BY id DESC LIMIT 1",
+        (dataset_id,),
+    )
+    if run and (Path(run["run_dir"]) / "weights" / "best.pt").exists():
+        return str(Path(run["run_dir"]) / "weights" / "best.pt")
+    return "ed-s"
+
+
+def _resolve_model(name: str) -> str:
+    """A registry id, a registry name, a mirror name, or a path — all usable.
+
+    A path must be inside the lab's folders unless the server allows any
+    (:func:`_allowed_path`): a ``.pt`` is a pickle, and loading one runs
+    whatever code its author put in it.
+    """
+    text = str(name).strip()
+    row = None
+    if text.isdigit():
+        row = db.one("SELECT * FROM models WHERE id = ?", (int(text),))
+    if row is None:
+        row = db.one("SELECT * FROM models WHERE name = ?", (text,))
+    if row is not None:
+        return row["path"]
+    from easydetect.downloads import is_model_name
+
+    if not is_model_name(text):
+        _allowed_path(Path(text), what="model")
+    return text
+
+
+#: $EASYDETECT_LAB_ALLOW_PATHS: "1" lets the API open any path on this machine;
+#: otherwise it may name more folders to allow, separated like $PATH
+ALLOW_PATHS = "EASYDETECT_LAB_ALLOW_PATHS"
+
+
+def _allowed_path(path: Path, what: str = "folder") -> Path:
+    """``path``, if the API may open it: inside the lab's data folder, a
+    registered dataset's folder, or a folder $EASYDETECT_LAB_ALLOW_PATHS names.
+
+    The lab has no login, so whoever reaches the port could otherwise point
+    "register a folder" or batch inference at any file on the machine — or a
+    planted ``.pt``, which runs code when loaded.
+    """
+    setting = os.environ.get(ALLOW_PATHS, "").strip()
+    if setting.lower() in ("1", "true", "yes", "on"):
+        return path
+    roots = [DATA, *(Path(p).expanduser() for p in setting.split(os.pathsep) if p.strip())]
+    roots += [Path(row["path"]) for row in db.query("SELECT path FROM datasets")]
+    # runs the lab wrote itself, wherever an older data folder kept them
+    roots += [Path(row["run_dir"]) for row in db.query(
+        "SELECT DISTINCT run_dir FROM jobs WHERE run_dir IS NOT NULL")]
+    try:
+        resolved = path.expanduser().resolve()
+    except (OSError, RuntimeError):     # a symlink loop, say
+        resolved = None
+    if resolved is not None and any(resolved.is_relative_to(root.resolve()) for root in roots):
+        return path
+    if what == "model":
+        raise HTTPException(403, f"'{path}'은(는) 등록한 모델도 랩 폴더 안의 파일도 아니에요."
+                                 f" 모델 탭에서 올리거나, 서버를 {ALLOW_PATHS}=1로 켜 주세요")
+    raise HTTPException(403, f"'{path}'은(는) 랩 폴더 밖이에요."
+                             f" 서버를 {ALLOW_PATHS}=1로 켜면 열 수 있어요")
+
+
+def _model_key(name: str, task: str) -> tuple:
+    """What makes two loaded models the same: the task, the file, and when the
+    file (or the .bin / .onnx / pose / mask models it reads) last changed —
+    so a run exported again is loaded again, not served from before."""
+    path = Path(name).expanduser()
+    if not path.is_file():
+        return task, name, None              # a mirror name: its download never changes
+    path = path.resolve()
+    beside = [path.with_suffix(s) for s in (".bin", ".onnx")]
+    beside += [path.parent / sibling for sibling in SIBLING_MODELS]
+    mtimes = [path.stat().st_mtime_ns]
+    for other in beside:
+        with contextlib.suppress(OSError):
+            mtimes.append(other.stat().st_mtime_ns)
+    return task, str(path), max(mtimes)
+
+
+def _model(name: str, task: str = "detect"):
+    """Compiled models are expensive: keep the last few used, per file and task."""
+    from easydetect import Detector
+
+    key = _model_key(name, task)
+    with _models_lock:              # requests run in threads now; load each model once
+        model = _models.get(key)
+        if model is not None:
+            _models.move_to_end(key)
+            return model
+        for stale in [k for k in _models if k[:2] == key[:2]]:
+            del _models[stale]      # the same file, before it changed
+        model = _models[key] = Detector(name, verbose=False, task=task)
+        while len(_models) > MODEL_CACHE_SIZE:
+            _models.popitem(last=False)
+    return model
+
+
+@contextlib.contextmanager
+def _using(model):
+    """Hold ``model`` for one prediction. Two threads in a model's first call
+    would both export and compile it, into the same cache folder."""
+    with _models_lock:
+        lock = _model_locks.setdefault(model, threading.Lock())
+    with lock:
+        yield model
+
+
+def _task(segment: str | None, task: str | None = None) -> str:
+    """The form's "outline objects" / "keypoints" boxes: masks or keypoints
+    with every box, or boxes alone."""
+    if str(task or "").lower() in ("pose", "segment"):
+        return str(task).lower()
+    return "segment" if str(segment or "").lower() in ("1", "true", "on", "yes") else "detect"
+
+
+def _data_yaml(dataset: dict) -> tuple[Path, dict]:
+    path = Path(dataset["path"]) / "data.yaml"
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    except yaml.YAMLError:
+        cfg = None
+    return path, cfg if isinstance(cfg, dict) else {}
+
+
+def _data_cfg(dataset: dict) -> dict:
+    return _data_yaml(dataset)[1]
+
+
+def _kpt_shape(dataset: dict) -> list[int] | None:
+    return kpt_shape_of(_data_cfg(dataset))
+
+
+def _labelling(dataset: dict, images: list[Path] | None = None) -> dict:
+    """``task`` and, for a keypoint dataset, ``keypoints`` ({names, skeleton,
+    flip}) — what the labelling page draws and the trainer learns."""
+    cfg = _data_cfg(dataset)
+    if images is None and kpt_shape_of(cfg) is None and cfg.get("task") not in TASKS:
+        images = _images(dataset)
+    task = dataset_task(cfg, (label_path(i) for i in images or ()))
+    out = {"task": task, "keypoints": None}
+    if task == "pose":
+        names = keypoint_names(cfg)
+        flip = cfg.get("flip_idx")
+        out["keypoints"] = {
+            "names": names,
+            "skeleton": [[int(a), int(b)] for a, b in cfg.get("skeleton") or []],
+            "flip": [int(f) for f in flip] if flip and len(flip) == len(names)
+            else flip_pairs(names),
+        }
+    return out
+
+
+def _latest_run(dataset_id: int) -> Path | None:
+    run = db.one(
+        "SELECT run_dir FROM jobs WHERE dataset_id = ? AND kind = 'train' AND status = 'done'"
+        " AND run_dir IS NOT NULL ORDER BY id DESC LIMIT 1", (dataset_id,))
+    return Path(run["run_dir"]) if run else None
+
+
+def _run_task(run_dir: Path) -> str:
+    """What a trained run can do beyond boxes: keypoints or outlines it learned."""
+    weights = Path(run_dir) / "weights"
+    if (weights / "pose.onnx").exists():
+        return "pose"
+    if (weights / "mask_decoder.onnx").exists():
+        return "segment"
+    return "detect"
+
+
+def _register(name: str, root: Path, names: list[str] | None = None) -> dict:
+    """Work out what a folder holds, write a data.yaml if it lacks one, record it."""
+    images = list_images(root)
+    if not images:
+        if root.parent == DATASETS:
+            shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(400, "이미지를 찾지 못했어요")
+    images_root = _common_parent(images)
+    labels_root = labels_beside(images_root)
+
+    labelled = 0
+    seen: set[int] = set()
+    for image in images:
+        label = label_path(image)
+        if not label.exists():
+            continue
+        labelled += 1
+        for line in label.read_text(encoding="utf-8").splitlines():
+            if line.split():
+                seen.add(int(float(line.split()[0])))
+
+    existing = next(iter(root.rglob("data.yaml")), None)
+    if names:
+        class_names = list(names)
+        _write_data_yaml(root, images_root, class_names)
+    elif existing:
+        cfg = yaml.safe_load(existing.read_text(encoding="utf-8")) or {}
+        raw = cfg.get("names") or {}
+        if isinstance(raw, list):
+            table = dict(enumerate(raw))
+        else:
+            table = {int(k): v for k, v in raw.items()}
+        class_names = [table[k] for k in sorted(table)]
+    else:
+        class_names = [f"class_{i}" for i in range(max(seen) + 1)] if seen else ["class_0"]
+        _write_data_yaml(root, images_root, class_names)
+
+    dataset_id = db.add_dataset(
+        name=name,
+        path=str(root),
+        images_dir=str(images_root),
+        labels_dir=str(labels_root),
+        images=len(images),
+        labelled=labelled,
+        classes=class_names,
+    )
+    _forget_images(dataset_id)
+    return {
+        "id": dataset_id,
+        "images": len(images),
+        "labelled": labelled,
+        "classes": class_names,
+    }
+
+
+def _highest_class_in_use(dataset: dict) -> int | None:
+    """The largest class index any label file refers to, or None when unlabelled."""
+    highest = None
+    shape = _kpt_shape(dataset)
+    for image in _images(dataset):
+        for row in read_labels(label_path(image), shape):
+            if highest is None or row["cls"] > highest:
+                highest = row["cls"]
+    return highest
+
+
+def _ensure_split(dataset: dict, val_ratio: float) -> str | None:
+    """Hold images out for validation, unless the dataset already has its own split.
+
+    Validating on the training images reports a number that only ever flatters
+    the run, which is worse than no number at all. Every k-th image (sorted, so
+    the choice is stable across runs) becomes the val set, and data.yaml points
+    at the two lists.
+    """
+    root = Path(dataset["path"])
+    cfg = yaml.safe_load((root / "data.yaml").read_text(encoding="utf-8")) or {}
+    if cfg.get("train") != cfg.get("val"):
+        return None  # the dataset came with its own split; leave it alone
+
+    images = [image for image in _images(dataset) if label_path(image).exists()]
+    if len(images) < 4:
+        return f"only {len(images)} labelled images — validating on the same ones"
+
+    step = max(int(round(1 / max(min(val_ratio, 0.5), 0.05))), 2)
+    val = images[::step]
+    held_out = set(val)
+    train = [i for i in images if i not in held_out]
+    (root / "train.txt").write_text("\n".join(str(p.resolve()) for p in train), encoding="utf-8")
+    (root / "val.txt").write_text("\n".join(str(p.resolve()) for p in val), encoding="utf-8")
+
+    cfg.update({"path": str(root.resolve()), "train": "train.txt", "val": "val.txt"})
+    (root / "data.yaml").write_text(
+        yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    return f"{len(train)} train / {len(val)} val images"
+
+
+def _split_lists(dataset: dict, arcname: dict[Path, PurePosixPath]) -> dict[str, list[str]]:
+    """train/val as lists of zip paths, when the dataset's data.yaml defines them.
+
+    Whatever form the split takes on disk — folders, ``../`` paths, lists of
+    absolute paths written for this machine — it leaves as relative paths
+    inside the zip. Nothing, rather than a wrong split, when it cannot be read.
+    """
+    from easydetect.data.dataset import list_images as split_images
+    from easydetect.data.dataset import load_data_yaml
+
+    yaml_file = Path(dataset["path"]) / "data.yaml"
+    if not yaml_file.exists():
+        return {}
+    try:
+        cfg = load_data_yaml(yaml_file)
+        out = {}
+        for split in ("train", "val"):
+            if cfg[split] is None:
+                return {}
+            files = split_images(cfg["root"], cfg[split], cfg["yaml_dir"])
+            out[split] = [str(arcname[f.resolve()]) for f in files if f.resolve() in arcname]
+    except (OSError, ValueError, KeyError):
+        return {}
+    if not out["train"] or not out["val"] or out["train"] == out["val"]:
+        return {}
+    return out
+
+
+def _combine(sources: list[dict], name: str) -> dict:
+    """Copy several datasets into a new one, unioning their class lists.
+
+    Class indices are per-dataset, so a straight file copy would silently turn
+    every "car" in the second set into whatever index 1 means in the first.
+    Names are matched instead, and labels rewritten onto the union.
+    """
+    names: list[str] = []
+    for source in sources:
+        for class_name in json.loads(source["classes"]):
+            if class_name not in names:
+                names.append(class_name)
+    # keypoints merge only with the same keypoints: index i must mean one thing
+    labelling = {(tuple(kpt_shape_of(c) or ()), tuple(keypoint_names(c) or ()))
+                 for c in map(_data_cfg, sources)}
+    if len(labelling) > 1:
+        raise HTTPException(400, "데이터셋마다 키포인트가 달라요. "
+                                 "먼저 같은 키포인트로 맞춰 주세요")
+    first = _data_cfg(sources[0])
+    shape = kpt_shape_of(first)
+
+    target = _fresh_dir(DATASETS, name)
+    (target / "images").mkdir(parents=True)
+    (target / "labels").mkdir(parents=True)
+    copied = 0
+    for source in sources:
+        images_root = Path(source["images_dir"])
+        remap = {i: names.index(n) for i, n in enumerate(json.loads(source["classes"]))}
+        prefix = _slug(source["name"])
+        for image in _images(source):
+            stem = f"{prefix}_{image.relative_to(images_root).as_posix().replace('/', '_')}"
+            destination = _unique(target / "images" / stem)
+            shutil.copy2(image, destination)
+            copied += 1
+            label = label_path(image)
+            if not label.exists():
+                continue
+            rows = [dict(row, cls=remap.get(row["cls"], row["cls"]))
+                    for row in read_labels(label, shape)]
+            write_labels((target / "labels" / destination.name).with_suffix(".txt"), rows, shape)
+
+    registered = _register(name, target, names=names)
+    tasks = {_labelling(s)["task"] for s in sources}
+    carried = {k: first[k] for k in ("kpt_shape", "flip_idx", "skeleton") if k in first}
+    if shape is not None:
+        carried["kpt_names"] = {i: keypoint_names(first) for i in range(len(names))}
+    if len(tasks) == 1 or carried:
+        cfg = yaml.safe_load((target / "data.yaml").read_text(encoding="utf-8")) or {}
+        cfg.update(carried, task="pose" if shape is not None else tasks.pop())
+        (target / "data.yaml").write_text(
+            yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {**registered, "added": copied, "sources": [s["id"] for s in sources]}
+
+
+def _rename_in_data_yaml(dataset: dict, names: list[str]) -> None:
+    """New class names in data.yaml, and nothing else changed.
+
+    Writing it fresh would also reset train/val to the whole folder: a
+    Roboflow export's own valid/ split would vanish, and the next run would
+    train on its validation pictures.
+    """
+    root = Path(dataset["path"])
+    path = root / "data.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    if not isinstance(cfg, dict):
+        _write_data_yaml(root, Path(dataset["images_dir"]), names)
+        return
+    cfg["names"] = dict(enumerate(names))
+    cfg.pop("nc", None)                           # names alone say how many
+    if isinstance(cfg.get("kpt_names"), dict):    # one keypoint list per class
+        cfg["kpt_names"] = {i: keypoint_names(cfg) for i in range(len(names))}
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def _write_data_yaml(root: Path, images_root: Path, names: list[str]) -> Path:
+    path = root / "data.yaml"
+    split = images_root.relative_to(root).as_posix() if images_root != root else "."
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "path": str(root.resolve()),
+                "train": str(split),
+                "val": str(split),
+                "names": dict(enumerate(names)),
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _fresh_dir(parent: Path, name: str) -> Path:
+    """``<time>_<name>`` under ``parent``, never one that already exists.
+
+    Two uploads with the same name inside one second used to land on the
+    same folder and fail with FileExistsError.
+    """
+    base = f"{int(time.time())}_{_slug(name)}"
+    candidate, n = parent / base, 2
+    while candidate.exists():
+        candidate, n = parent / f"{base}_{n}", n + 1
+    return candidate
+
+
+def _slug(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "-" for c in name).strip("-")[:40] or "set"
+
+
+def _safe_extract(zf: zipfile.ZipFile, target: Path) -> None:
+    """Refuse entries that would escape the dataset folder."""
+    root = target.resolve()
+    for member in zf.infolist():
+        # is_relative_to, not startswith: "…/set-evil" starts with "…/set"
+        if not (target / member.filename).resolve().is_relative_to(root):
+            raise HTTPException(400, f"zip 안에 위험한 경로가 있어요: {member.filename}")
+    zf.extractall(target)
+
+
+def _common_parent(paths: list[Path]) -> Path:
+    """The deepest folder holding every image: ``images/`` for images/train + images/val."""
+    return Path(os.path.commonpath([str(p.parent) for p in paths]))
+
+
+def _artifacts(job: dict) -> list[str]:
+    if not job.get("run_dir"):
+        return []
+    run_dir = Path(job["run_dir"])
+    found = []
+    if (run_dir / "weights" / "best.pt").exists():
+        found.append("weights")
+    if any((run_dir / "openvino").glob("*.xml")):
+        found.append("openvino")
+    if any((run_dir / "openvino").glob("*.onnx")):
+        found.append("onnx")
+    if (run_dir / "results.csv").exists():
+        found.append("results")
+    if (run_dir / "train.log").exists():
+        found.append("log")
+    if (run_dir / "eval" / "report.json").exists():
+        found.append("report")
+    if (run_dir / "results.json").exists():
+        found.append("predictions")
+    if (run_dir / "annotated.mp4").exists():
+        found.append("video")
+    return found

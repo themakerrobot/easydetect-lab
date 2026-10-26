@@ -1,0 +1,760 @@
+# Apache-2.0
+"""One background thread that runs queued jobs — training, or a batch auto-label.
+
+Work happens inside this process; a thread is enough because torch and OpenVINO
+release the GIL. Cancelling sets a flag the job checks at its next natural
+boundary (an epoch, or an image), so nothing is killed mid-write.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import gc
+import json
+import os
+import shutil
+import sys
+import tempfile
+import threading
+import time
+import traceback
+from pathlib import Path
+
+from easydetect.utils.imageio import cv2_path, imread, imwrite  # any path, Hangul included
+
+from labeling import (
+    dataset_task,
+    keypoint_names,
+    kpt_shape_of,
+    label_path,
+    list_images,
+    predict_boxes,
+    write_labels,
+)
+
+
+def _data_cfg(dataset: dict) -> dict:
+    import yaml
+
+    path = Path(dataset["path"]) / "data.yaml"
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    except (OSError, yaml.YAMLError):
+        cfg = None
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _labelled_task(dataset: dict) -> str:
+    images = list_images(Path(dataset["images_dir"]))
+    return dataset_task(_data_cfg(dataset), (label_path(i) for i in images))
+
+
+def _loader_workers() -> int:
+    """Processes decoding images for training — half the cores, at most eight.
+
+    With none, a GPU waits on one thread reading JPEGs: 30% busy on a 7,000
+    image set. $EASYDETECT_WORKERS overrides it (0 for in-process loading).
+    """
+    override = os.environ.get("EASYDETECT_WORKERS")
+    if override is not None and override.strip().isdigit():
+        return int(override)
+    return max(1, min(8, (os.cpu_count() or 2) // 2))
+
+
+def _time_left(elapsed: float, done: int, remaining: int, per_item_extra: int = 0) -> str:
+    """"남은 시간 약 N분", or "남은 시간 계산 중" until enough is done to say.
+
+    The first items carry start-up — a model compiling, loader processes
+    spawning — so an estimate from them is wildly high: "32 minutes" for a run
+    that took 22 seconds. Wait for a few before promising anything.
+    """
+    if done < 3 or elapsed <= 0:
+        return "남은 시간 계산 중"
+    return f"남은 시간 약 {_duration(elapsed / done * (remaining + per_item_extra))}"
+
+
+def _duration(seconds: float) -> str:
+    seconds = max(int(seconds), 0)
+    if seconds >= 3600:
+        return f"{seconds // 3600}시간 {seconds % 3600 // 60}분"
+    if seconds >= 60:
+        return f"{seconds // 60}분"
+    return f"{seconds}초"
+
+
+def _stage_scores(run_dir: Path) -> str | None:
+    """What the keypoint / mask stage reached, for the finished job's line."""
+    import csv
+
+    parts = []
+    finished = run_dir / "pose" / "finished"
+    if finished.exists():
+        parts.append(f"키포인트 AP {float(finished.read_text().strip() or 0):.3f}")
+    results = run_dir / "segment" / "results.csv"
+    if results.exists():
+        with results.open(encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        if rows:
+            first, best = float(rows[0]["miou"]), max(float(r["miou"]) for r in rows)
+            parts.append(f"윤곽 mIoU {best:.3f} (학습 전 {first:.3f})")
+    return " · ".join(parts) or None
+
+
+def _release_memory() -> None:
+    """Hand back what a finished job held: its model, and the GPU memory torch
+    keeps cached for reuse — which otherwise stays taken for the next job, and
+    for anything else on the card, until the process ends."""
+    gc.collect()
+    torch = sys.modules.get("torch")        # a job that never imported it holds no VRAM
+    if torch is not None and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _torch_device(device: str | None) -> str | None:
+    """A job's device as torch takes it: "0" is "cuda:0"; None lets torch pick."""
+    device = str(device or "").strip()
+    if not device:
+        return None
+    return f"cuda:{device}" if device.isdigit() else device
+
+
+#: pictures per batch when scoring a run — validation only reads, so it fits
+#: where the training batch did, several times over
+EVAL_BATCH = 8
+
+
+class Cancelled(Exception):
+    """Raised inside a job to stop it cleanly."""
+
+
+def _tail(path: Path, lines: int = 12) -> str:
+    """The end of a log, one line a line, for the failure's details."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+    except OSError:
+        return ""
+    return "\n".join(text[-lines:])[-2000:]
+
+
+@contextlib.contextmanager
+def _kept_awake():
+    """Windows goes to sleep after its idle time even in the middle of a run
+    (a laptop left training over lunch); told so, it stays awake until the job
+    ends. The screen may still turn off. Elsewhere: nothing."""
+    if os.name != "nt":
+        yield
+        return
+    import ctypes
+
+    continuous, system_required = 0x80000000, 0x00000001
+    state = getattr(getattr(ctypes, "windll", None), "kernel32", None)
+    with contextlib.suppress(Exception):
+        state.SetThreadExecutionState(continuous | system_required)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            state.SetThreadExecutionState(continuous)
+
+
+def _write_new_labels(path: Path, boxes: list[dict], shape) -> bool:
+    """Write a label file only if none is there yet, also when a person saves
+    one while the model was looking at the picture: written aside, then linked
+    into place, which fails rather than replace a file that appeared."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.auto")
+    write_labels(tmp, boxes, shape)
+    try:
+        os.link(tmp, path)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:                    # a file system without links (FAT on a USB stick)
+        if path.exists():
+            return False
+        os.replace(tmp, path)
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _stopped_note(db, job: dict) -> str:
+    """What a stopped job got through, in a line: not the log it was writing."""
+    if job["kind"] == "train" and job.get("epochs"):
+        # the epoch it reached, not how many this job ran: a resumed one starts part-way
+        row = db.one("SELECT MAX(epoch) AS n FROM epochs WHERE job_id = ?", (job["id"],))
+        return f"에폭 {(row or {}).get('n') or 0}/{job['epochs']}에서 중지했어요"
+    return "중지했어요"
+
+
+def _box_filters(job) -> dict:
+    """An inference job's overlap filters, as ``predict()`` takes them; unset ones stay out."""
+    return {key: job[key] for key in ("iou", "contain") if job.get(key) is not None}
+
+
+def _postprocess(boxes, scores, shape: tuple[int, int], conf: float, **filters):
+    """Raw ``(boxes cxcywh 0..1, scores)`` -> ``(N, 6)`` pixel rows, as ``predict()`` makes them.
+
+    The same steps ``predict()`` takes — threshold, sort, duplicates dropped —
+    from easydetect itself; they read nothing from the predictor they hang on.
+    """
+    from easydetect.predictor import Predictor
+
+    return Predictor.postprocess(None, boxes, scores, shape, conf, **filters)
+
+
+def _optimizer_kwargs(job) -> dict:
+    """The run's optimizer settings as ``train()`` takes them; unset ones stay out."""
+    names = {"lr": "lr0", "lr_backbone_mult": "lr_backbone_mult",
+             "weight_decay": "weight_decay", "warmup_epochs": "warmup_epochs", "seed": "seed"}
+    out = {arg: job[column] for column, arg in names.items() if job.get(column) is not None}
+    if job.get("amp") is not None:
+        out["amp"] = bool(job["amp"])
+    return out
+
+
+def _decoder_kwargs(job) -> dict:
+    """``queries`` / ``denoising`` as ``train()`` takes them; unset ones stay out."""
+    return {key: int(job[key]) for key in ("queries", "denoising") if job.get(key) is not None}
+
+
+class Worker(threading.Thread):
+    def __init__(self, db, runs_dir: Path, poll: float = 1.0) -> None:
+        super().__init__(daemon=True)
+        self.db = db
+        self.runs_dir = Path(runs_dir)
+        self.poll = poll
+        self.cancelled: set[int] = set()
+        self.current: int | None = None
+        # not _stop: threading.Thread has a private _stop() of its own, and
+        # shadowing it breaks the interpreter's own bookkeeping after a fork
+        self._stopping = threading.Event()
+
+    def stop(self) -> None:
+        self._stopping.set()
+
+    def cancel(self, job_id: int) -> None:
+        self.cancelled.add(job_id)
+
+    def reap_stale(self) -> int:
+        """Jobs left 'running' by a previous process are dead, not running.
+
+        Nothing survives a restart — say so instead of showing a spinner that
+        will never finish.
+        """
+        stale = self.db.query("SELECT id FROM jobs WHERE status IN ('running', 'exporting')")
+        for job in stale:
+            self.db.update_job(
+                job["id"],
+                status="failed",
+                detail="서버가 다시 켜지면서 끊겼어요",
+                finished=time.time(),
+            )
+        # and any stopped run whose weights were never pointed at, from before
+        # salvage() existed: its best.pt is still there to evaluate or keep
+        for job in self.db.query("SELECT id FROM jobs WHERE kind = 'train' AND run_dir IS NULL"
+                                 " AND status IN ('failed', 'cancelled')"):
+            self.salvage(job["id"])
+        return len(stale)
+
+    def salvage(self, job_id: int) -> None:
+        """A training run that stopped early still has its best epoch on disk.
+
+        The run directory is only recorded when training finishes, so a run
+        cancelled, crashed or cut off by a restart looked empty: no evaluate,
+        no download, no register — for weights that may be an hour's work.
+        """
+        job = self.db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        if job is None or job["kind"] != "train" or job["run_dir"]:
+            return
+        run_dir = self.runs_dir / f"job{job['resume_of'] or job_id}"
+        best = run_dir / "weights" / "best.pt"
+        # a folder left by an older database with the same job number is not this run
+        if not best.exists() or best.stat().st_mtime < (job["started"] or 0) - 1:
+            return
+        row = self.db.one("SELECT MAX(map50_95) AS best FROM epochs WHERE job_id = ?", (job_id,))
+        self.db.update_job(job_id, run_dir=str(run_dir), best_map=(row or {}).get("best"))
+
+    def run(self) -> None:
+        while not self._stopping.is_set():
+            job = self.db.one("SELECT * FROM jobs WHERE status = 'queued' ORDER BY id LIMIT 1")
+            if job is None:
+                time.sleep(self.poll)
+                continue
+            # a cancel between the SELECT and here would otherwise be run over
+            if not self.db.claim_job(job["id"]):
+                continue
+            job["status"] = "running"
+            self.current = job["id"]
+            try:
+                with _kept_awake():
+                    self._run_one(job)
+            finally:
+                self.cancelled.discard(job["id"])
+                self.current = None
+                with contextlib.suppress(Exception):   # tidying up never stops the loop
+                    _release_memory()
+
+    def _run_one(self, job: dict) -> None:
+        """One job, its end written down however it ends."""
+        try:
+            if job["kind"] == "autolabel":
+                self._autolabel(job)
+            elif job["kind"] == "evaluate":
+                self._evaluate(job)
+            elif job["kind"] == "predict":
+                self._predict(job)
+            else:
+                self._train(job)
+        except Cancelled:
+            self.db.update_job(job["id"], status="cancelled", finished=time.time(),
+                               detail=_stopped_note(self.db, job))
+            self.salvage(job["id"])
+        except Exception as exc:
+            # the error in `detail`, one line; what led up to it in `log_tail`
+            # (the trainer's log when it wrote one, else the last progress line)
+            previous = self.db.one("SELECT detail, log_tail FROM jobs WHERE id = ?",
+                                   (job["id"],)) or {}
+            self.db.update_job(
+                job["id"],
+                status="failed",
+                detail=f"{type(exc).__name__}: {exc}",
+                log_tail=previous.get("log_tail") or previous.get("detail") or None,
+                finished=time.time(),
+            )
+            self.salvage(job["id"])
+            traceback.print_exc()
+
+    # -- the two kinds of work ---------------------------------------------
+
+    def _train(self, job: dict) -> None:
+        from easydetect import Detector
+
+        job_id = job["id"]
+        dataset = self.db.one("SELECT * FROM datasets WHERE id = ?", (job["dataset_id"],))
+        self.db.update_job(job_id, status="running", started=time.time(), detail=None, progress=0)
+        run_name = f"job{job['resume_of'] or job_id}"
+
+        last_epoch_seconds: list[float] = []
+
+        def on_epoch_end(row: dict) -> None:
+            if job_id in self.cancelled:
+                raise Cancelled()
+            self.db.add_epoch(job_id, row)
+            last_epoch_seconds[:] = [row["seconds"]]
+            self.db.update_job(job_id, progress=row["epoch"] / max(job["epochs"], 1))
+
+        def on_progress(p: dict) -> None:
+            """Inside an epoch: where it is and how long is left, about once a second.
+
+            A 7,000-image epoch is minutes long; without this the page showed
+            nothing until the first one ended, which read as a run that never
+            started. Cancelling is honoured here too, not only between epochs.
+            """
+            if job_id in self.cancelled:
+                raise Cancelled()
+            if p["phase"] in ("keypoints", "masks"):
+                return stage(p)
+            epoch, epochs = p["epoch"], p["epochs"]
+            if p["phase"] == "val":
+                self.db.update_job(job_id, detail=f"에폭 {epoch}/{epochs} · 검증 중")
+                return
+            step, steps = p["step"], p["steps"]
+            if last_epoch_seconds:   # a whole epoch measured: the honest unit
+                per_step = p["seconds"] / max(step, 1)
+                left = (steps - step) * per_step + (epochs - epoch) * last_epoch_seconds[0]
+                eta = f"남은 시간 약 {_duration(left)}"
+            else:                    # first epoch: loader start-up skews the first steps
+                eta = _time_left(p["seconds"], step, steps - step, per_item_extra=(
+                    (epochs - epoch) * steps))
+            self.db.update_job(
+                job_id,
+                progress=(epoch - 1 + step / steps) / max(epochs, 1),
+                detail=f"에폭 {epoch}/{epochs} · 배치 {step}/{steps} · {eta}",
+            )
+
+        def stage(p: dict) -> None:
+            """After the boxes: the keypoint network, or the mask decoder.
+
+            Its own bar from 0, with the stage named, rather than a bar
+            stuck at 100% for what can be as long again as the boxes took.
+            """
+            what = "키포인트 학습" if p["phase"] == "keypoints" else "윤곽(마스크) 학습"
+            if p.get("stage") == "encode":
+                self.db.update_job(job_id, progress=p["step"] / max(p["steps"], 1),
+                                   detail=f"{what} 준비 · 사진 {p['step']}/{p['steps']} 읽는 중")
+                return
+            epoch, epochs, step, steps = p["epoch"], p["epochs"], p["step"], p["steps"]
+            done = (epoch - 1 + step / max(steps, 1)) / max(epochs, 1)
+            left = p["seconds"] / max(step, 1) * ((steps - step) + (epochs - epoch) * steps)
+            score = (f" · AP {p['ap']:.3f}" if "ap" in p
+                     else f" · mIoU {p['miou']:.3f}" if "miou" in p else "")
+            self.db.update_job(
+                job_id, progress=done,
+                detail=f"{what} · 에폭 {epoch}/{epochs} · 배치 {step}/{steps}{score} · "
+                       + (f"남은 시간 약 {_duration(left)}" if epoch > 1 or step >= 3
+                          else "남은 시간 계산 중"))
+
+        task = _labelled_task(dataset)
+        model = Detector(job["model"], verbose=False)
+        # The trainer picks its own run directory and skips one that already
+        # exists, so the log cannot be written there until it comes back.
+        handle, temporary = tempfile.mkstemp(prefix=f"job{job_id}_", suffix=".log")
+        log = Path(temporary)
+        try:
+            # line-buffered: `tail -f` shows each epoch as it ends, not every 8 KB
+            with open(handle, "w", encoding="utf-8", buffering=1) as stream, \
+                    contextlib.redirect_stdout(stream):
+                best = model.train(
+                    data=str(Path(dataset["path"]) / "data.yaml"),
+                    epochs=job["epochs"],
+                    imgsz=job["imgsz"],
+                    batch=job["batch"],
+                    freeze=job["freeze"] or None,
+                    device=job["device"] or None,
+                    **({} if job["patience"] is None else {"patience": job["patience"]}),
+                    **({} if job["augment"] is None else {"augment": bool(job["augment"])}),
+                    **_optimizer_kwargs(job),
+                    **_decoder_kwargs(job),
+                    project=str(self.runs_dir),
+                    name=run_name,
+                    resume=bool(job["resume_of"]),
+                    workers=_loader_workers(),
+                    on_epoch_end=on_epoch_end,
+                    on_progress=on_progress,
+                    # outlines only when the dataset is labelled for them:
+                    # a box dataset that holds a few stays a box dataset
+                    seg=task == "segment",
+                )
+        except Exception:
+            self.db.update_job(job_id, log_tail=_tail(log))  # what it said before it died
+            # move, not replace: the temp directory is often a different
+            # filesystem, and a rename across one would mask the real failure
+            shutil.move(str(log), self.runs_dir / f"job{job_id}-failed.log")
+            raise
+        run_dir = best.parent.parent
+        shutil.move(str(log), run_dir / "train.log")
+        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+        # export first: a job that says "done" must have everything it advertises
+        self.db.update_job(job_id, status="exporting", progress=1.0, detail="exporting…")
+        note = self._export(model, run_dir, job_id, int8=bool(job.get("int8")),
+                            data=Path(dataset["path"]) / "data.yaml")
+        note = "; ".join(n for n in (_stage_scores(run_dir), note) if n) or None
+        self.db.update_job(
+            job_id,
+            status="done",
+            detail=note,
+            run_dir=str(run_dir),
+            best_map=summary.get("best_map50_95"),
+            finished=time.time(),
+        )
+
+    def _autolabel(self, job: dict) -> None:
+        """Pre-label every unlabelled image in a dataset, so a person only corrects."""
+        from easydetect import Detector
+
+        job_id = job["id"]
+        dataset = self.db.one("SELECT * FROM datasets WHERE id = ?", (job["dataset_id"],))
+        images_root = Path(dataset["images_dir"])
+        names = json.loads(dataset["classes"])
+        images = [
+            image
+            for image in list_images(images_root)
+            if not label_path(image).exists()
+        ]
+        self.db.update_job(job_id, status="running", started=time.time(), detail=None, progress=0)
+        if not images:
+            self.db.update_job(
+                job_id, status="done", detail="every image already has labels",
+                progress=1.0, finished=time.time(),
+            )
+            return
+
+        cfg = _data_cfg(dataset)
+        task = _labelled_task(dataset)
+        shape = kpt_shape_of(cfg)
+        kpt_names = keypoint_names(cfg) if task == "pose" else None
+        model = Detector(job["model"], verbose=False, task=task)
+        written = 0
+        for i, image in enumerate(images, start=1):
+            if job_id in self.cancelled:
+                raise Cancelled()
+            # someone labelled it while this job ran: theirs stays
+            if not label_path(image).exists():
+                boxes = predict_boxes(model, image, names, conf=job["conf"] or 0.35,
+                                      kpt_names=kpt_names)
+                # nothing found is not "nothing there": an empty file would mark
+                # the picture as a labelled background, and it would teach that
+                if boxes and _write_new_labels(label_path(image), boxes, shape):
+                    written += 1
+            self.db.update_job(job_id, progress=i / len(images))
+        self.db.update_job(
+            job_id,
+            status="done",
+            detail=f"{written} of {len(images)} images got boxes — check them; "
+                   "the rest stay unlabelled",
+            progress=1.0,
+            finished=time.time(),
+        )
+        self.refresh_counts(dataset["id"])
+
+    def _evaluate(self, job: dict) -> None:
+        """Score a trained run on its validation split, and draw what it got wrong.
+
+        A single mAP tells you whether to keep going but never why. This writes
+        one side-by-side image per validation frame — truth in green, prediction
+        in red — plus per-class AP, which is where "the model never sees small
+        cans" actually shows up.
+
+        One pass over the pictures, on the run's own device and in batches:
+        the boxes drawn are the ones the scoring pass produced, caught on their
+        way out of the network, rather than a second prediction per picture.
+        """
+        import numpy as np
+        from easydetect import Detector
+        from easydetect.data.dataset import load_data_yaml
+        from easydetect.plotting import draw_boxes
+        from easydetect.results import Boxes
+
+        job_id = job["id"]
+        parent = self.db.one("SELECT * FROM jobs WHERE id = ?", (job["resume_of"],))
+        if parent is None or not parent["run_dir"]:
+            raise RuntimeError("that training job has no weights to evaluate")
+        dataset = self.db.one("SELECT * FROM datasets WHERE id = ?", (job["dataset_id"],))
+        data_yaml = str(Path(dataset["path"]) / "data.yaml")
+        weights = Path(parent["run_dir"]) / "weights" / "best.pt"
+
+        self.db.update_job(job_id, status="running", started=time.time(), detail=None, progress=0)
+        model = Detector(str(weights), verbose=False)
+        conf = job["conf"] or 0.5
+
+        from easydetect.data.dataset import DetDataset
+
+        val = DetDataset(data_yaml, "val", parent["imgsz"], augment=False)
+        metrics, found = self._score(model, data_yaml, parent, conf, len(val.files))
+        names = load_data_yaml(data_yaml)["names"]
+
+        out = Path(parent["run_dir"]) / "eval"
+        out.mkdir(parents=True, exist_ok=True)
+        cards = []
+        truth_per_class: dict[int, int] = {}   # validation boxes a class, beside its AP
+        for i, image_path in enumerate(val.files):
+            if job_id in self.cancelled:
+                raise Cancelled()
+            frame = imread(str(image_path))
+            height, width = frame.shape[:2]
+            truth = val._load_labels(image_path)             # cls cx cy w h, normalised
+            for c in (truth[:, 0] if len(truth) else ()):
+                truth_per_class[int(c)] = truth_per_class.get(int(c), 0) + 1
+            corners = np.zeros((len(truth), 6), np.float32)
+            if len(truth):
+                cx, cy, w, h = (truth[:, 1] * width, truth[:, 2] * height,
+                                truth[:, 3] * width, truth[:, 4] * height)
+                corners[:, 0], corners[:, 1] = cx - w / 2, cy - h / 2
+                corners[:, 2], corners[:, 3] = cx + w / 2, cy + h / 2
+                corners[:, 4], corners[:, 5] = 1.0, truth[:, 0]
+            painted = draw_boxes(
+                frame,
+                Boxes(corners, (height, width)),
+                {k: f"참 {v}" for k, v in names.items()},
+                conf=False,
+                color=(110, 220, 60),  # truth is always green, whatever the class
+            )
+            if found is not None:
+                boxes, scores = found[i]
+                predicted = Boxes(_postprocess(boxes, scores, (height, width), conf,
+                                               **_box_filters(job)), (height, width))
+                painted = draw_boxes(painted, predicted, model.names)
+            else:  # the scoring pass could not be watched: predict this one again
+                result = model.predict(str(image_path), conf=conf, verbose=False,
+                                       **_box_filters(job))[0]
+                predicted = result.boxes
+                painted = draw_boxes(painted, predicted, result.names)
+            imwrite(str(out / f"{i:04d}_{image_path.stem}.jpg"), painted)
+            cards.append(
+                {
+                    "file": f"{i:04d}_{image_path.stem}.jpg",
+                    "truth": len(truth),
+                    "found": len(predicted),
+                }
+            )
+            self.db.update_job(job_id, progress=(i + 1) / max(len(val.files), 1))
+
+        report = {
+            "map50": metrics["map50"],
+            "map50_95": metrics["map"],
+            "conf": conf,
+            "per_class": [
+                {"name": names.get(k, str(k)), "ap50_95": v,
+                 "boxes": truth_per_class.get(int(k), 0) if str(k).isdigit() else None}
+                for k, v in sorted(metrics.get("per_class", {}).items())
+            ],
+            "images": cards,
+        }
+        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2),
+                                        encoding="utf-8")
+        self.db.update_job(
+            job_id,
+            status="done",
+            run_dir=parent["run_dir"],
+            best_map=metrics["map"],
+            progress=1.0,
+            detail=f"mAP50 {metrics['map50']:.3f} · mAP50-95 {metrics['map']:.3f}"
+                   f" · {len(cards)}장 미리보기",
+            finished=time.time(),
+        )
+
+    def _score(self, model, data_yaml: str, parent: dict, conf: float, count: int):
+        """``validate_torch``'s metrics, and each val picture's raw boxes and scores.
+
+        A forward hook keeps, per picture, the queries scoring at least
+        ``conf`` — a few rows, not the whole output. ``None`` for the boxes when
+        the pass did not see exactly ``count`` pictures in order, so the caller
+        falls back to predicting each one.
+        """
+        import torch
+        from easydetect.validator import validate_torch
+
+        device = _torch_device(parent.get("device"))
+        if device and device.startswith("cuda") and not torch.cuda.is_available():
+            device = "cpu"                   # trained on a card this machine no longer has
+        found: list = []
+
+        def keep(_module, _inputs, output):
+            scores = output["pred_logits"].detach().float().sigmoid()
+            boxes = output["pred_boxes"].detach().float()
+            for b in range(scores.shape[0]):
+                wanted = scores[b].max(-1).values >= conf
+                found.append((boxes[b][wanted].cpu().numpy(), scores[b][wanted].cpu().numpy()))
+
+        hook = model.net.register_forward_hook(keep)
+        try:
+            metrics = validate_torch(
+                model.net, data_yaml, imgsz=parent["imgsz"], batch=EVAL_BATCH,
+                device=device,
+                workers=min(_loader_workers(), EVAL_BATCH),
+            )
+        finally:
+            hook.remove()
+        if len(found) != count:
+            model.net.to("cpu")              # predict() exports it, and exports from the CPU
+            return metrics, None
+        return metrics, found
+
+    def _predict(self, job: dict) -> None:
+        """Run a model over everything in a source and keep the results.
+
+        One image at a time through the browser is fine for a look; a shift's
+        worth of footage is a job. Annotated frames land next to a results.json
+        that holds every box, and the pair zips up for download.
+        """
+        import cv2
+        from easydetect import Detector
+        from easydetect.sources import SourceLoader
+
+        job_id = job["id"]
+        out = self.runs_dir / f"job{job_id}"
+        (out / "images").mkdir(parents=True, exist_ok=True)
+        # run_dir from the start, so the page can show frames as they are drawn
+        self.db.update_job(job_id, status="running", started=time.time(), progress=0,
+                           run_dir=str(out), detail="모델 불러오는 중…")
+
+        model = Detector(job["model"], verbose=False, task=job.get("task") or "detect")
+        conf = job["conf"] or 0.5
+        loader = SourceLoader(job["source"], vid_stride=1)
+        total = max(len(loader), 1)
+        records, found, video = [], 0, None
+        per_class: dict[str, int] = {}
+        first_done, reported = None, 0.0   # the first frame carries the model warm-up
+        try:
+            for i, frame in enumerate(loader, start=1):
+                if job_id in self.cancelled:
+                    raise Cancelled()
+                result = model.predict(frame.img, conf=conf, verbose=False,
+                                       **_box_filters(job))[0]
+                painted = result.plot()
+                found += len(result.boxes)
+                for c in result.boxes.cls:
+                    name_ = result.name_of(c)
+                    per_class[name_] = per_class.get(name_, 0) + 1
+                name = f"{i:05d}_{Path(frame.path).stem}.jpg"
+                imwrite(str(out / "images" / name), painted)
+                if frame.kind != "image":
+                    if video is None:
+                        height, width = painted.shape[:2]
+                        video = cv2.VideoWriter(
+                            cv2_path(out / "annotated.mp4"),
+                            cv2.VideoWriter_fourcc(*"mp4v"),
+                            frame.fps or 25.0,  # play back at the speed it was shot
+                            (width, height),
+                        )
+                    video.write(painted)
+                records.append({"file": name, "source": frame.path, "boxes": result.summary()})
+                now = time.time()
+                if first_done is None:
+                    first_done = (now, i)
+                if now - reported >= 1.0:          # words, not just a moving bar
+                    reported = now
+                    # a video is one source with many frames, so count frames there
+                    unit, at, of = ("프레임", frame.frame, frame.frames) if frame.frames \
+                        else ("이미지", i, total)
+                    self.db.update_job(
+                        job_id, progress=min(at / max(of, 1), 0.99),
+                        detail=f"{unit} {at}/{of} · 상자 {found}개 · "
+                               + _time_left(now - first_done[0], i - first_done[1], of - at),
+                    )
+        finally:
+            if video is not None:
+                video.release()
+
+        (out / "results.json").write_text(
+            json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        ranked = sorted(per_class.items(), key=lambda kv: -kv[1])
+        by_class = ", ".join(f"{n} {c}" for n, c in ranked[:4]) + (" …" if len(ranked) > 4 else "")
+        self.db.update_job(
+            job_id,
+            status="done",
+            run_dir=str(out),
+            progress=1.0,
+            detail=f"{len(records)}장 · 상자 {found}개" + (f" ({by_class})" if ranked else ""),
+            finished=time.time(),
+        )
+
+    def refresh_counts(self, dataset_id: int) -> None:
+        """Recount images and labelled images from disk.
+
+        A stat per image, nothing read: on a 5,000-image set this is ~130 ms,
+        against ~300 ms when it also opened every label to count boxes that no
+        caller looked at. Saving one label does not come through here at all.
+        """
+        dataset = self.db.one("SELECT * FROM datasets WHERE id = ?", (dataset_id,))
+        images_root = Path(dataset["images_dir"])
+        images = list_images(images_root)
+        labelled = sum(label_path(i).exists() for i in images)
+        self.db.update_dataset(dataset_id, images=len(images), labelled=labelled)
+
+    def _export(self, model, run_dir: Path, job_id: int, int8: bool = False,
+                data: Path | None = None) -> str | None:
+        """Deployable artefacts, so a finished job is downloadable straight away.
+
+        Always the FP32 IR (and the ONNX it comes from). With ``int8``, also
+        ``best_int8.xml``: quantized on pictures from the training split,
+        about twice as fast on a CPU without bfloat16 — but it can lose
+        accuracy, which is why it is asked for and never the default.
+        """
+        out = run_dir / "openvino"
+        try:
+            model.export(format="openvino", out_dir=out, verbose=False)
+        except Exception as exc:  # a model that trained is still worth keeping
+            return f"export failed: {exc}"
+        if not int8:
+            return None
+        try:
+            written = Path(model.export(format="openvino", int8=True, data=str(data),
+                                        out_dir=out, verbose=False))
+        except Exception as exc:  # nncf missing, say: the FP32 IR is still there
+            return f"INT8 export failed: {exc}"
+        # the float ONNX the INT8 IR was converted from: best.onnx again, byte for byte
+        written.with_suffix(".onnx").unlink(missing_ok=True)
+        return None
