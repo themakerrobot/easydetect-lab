@@ -112,8 +112,8 @@ def test_the_classroom_preset_is_in_the_form_and_picked_without_a_gpu(studio):
 def test_the_lab_asks_for_the_easydetect_that_has_queries():
     import run
 
-    assert run.EASYDETECT_AT_LEAST == "0.7.9"
-    assert "easydetect[train]>=0.7.9" in (ROOT / "requirements.txt").read_text()
+    assert run.EASYDETECT_AT_LEAST == "0.7.10"
+    assert "easydetect[train]>=0.7.10" in (ROOT / "requirements.txt").read_text()
 
 
 # ---------------------------------------------------------------- Pibo
