@@ -105,7 +105,7 @@
     "직접 바꾼 칸 {0}개는 목표를 바꿔도 그대로예요.": "The {0} field(s) you changed stay as you set them.",
     "목표값으로 되돌리기": "Use the goal's values",
     "예 — 빠르고 적은 데이터에 알맞아요": "Yes — faster, suits a small dataset",
-    "아니오 — 백본까지 내 데이터에 맞춰요": "No — the backbone learns your data too", "증강": "augment",
+    "아니오 — 백본까지 내 데이터에 맞춰요": "No — the backbone learns your data too", "자동 — COCO에 있는 물체면 고정, 없으면 백본까지 맞춰요": "Auto — frozen for objects COCO knows, otherwise it learns your data too", "백본 자동": "backbone auto", "증강": "augment",
     "확대·축소·자르기 증강": "Zoom, crop and colour augmentation",
     "크기와 위치가 다른 사진을 만들어 배워요. 에폭이 많을 때 도움이 되고, 짧은 학습에서는 느려져요.":
       "Trains on pictures at other sizes and positions. Helps longer runs; slows short ones.",

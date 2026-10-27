@@ -363,7 +363,16 @@ def list_datasets():
     for row in rows:
         row["classes"] = json.loads(row["classes"])
         row["task"] = _labelling(row)["task"]
+        row["coco_known"] = _coco_knows(row["classes"])
     return rows
+
+
+def _coco_knows(classes: list[str]) -> bool:
+    """Whether a COCO start detects one of these classes already (by name, as
+    easydetect matches them): then freeze="auto" keeps the backbone frozen."""
+    from easydetect.class_names import ALIASES, match_classes
+
+    return bool(match_classes(dict(enumerate(ALIASES)), dict(enumerate(classes))))
 
 
 @app.get("/api/datasets/{dataset_id}")
