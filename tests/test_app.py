@@ -79,6 +79,18 @@ def test_uploading_images_and_labels_counts_them(studio):
     assert client.get("/api/datasets").json()[0]["name"] == "set"
 
 
+@pytest.mark.parametrize("names, known", [(b"  0: pill\n  1: capsule\n", False),
+                                          (b"  0: pill\n  1: cups\n", True),
+                                          ("  0: 알약\n  1: 강아지\n".encode(), True)])
+def test_the_dataset_list_says_whether_coco_knows_a_class(studio, names, known):
+    """The classroom epochs read it: a backbone that trains (freeze "auto" on
+    classes COCO does not know) gets 800 steps, not 1,000."""
+    client, _ = studio
+    upload(client, {"images/a.jpg": image_bytes(), "labels/a.txt": b"0 .5 .5 .2 .2\n",
+                    "data.yaml": b"train: images\nval: images\nnames:\n" + names})
+    assert client.get("/api/datasets").json()[0]["coco_known"] is known
+
+
 def test_a_dataset_without_a_data_yaml_gets_one(studio):
     client, module = studio
     upload(client, {"images/a.jpg": image_bytes(), "labels/a.txt": b"2 0.5 0.5 0.2 0.2\n"})

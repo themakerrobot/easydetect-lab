@@ -125,7 +125,7 @@
           <div><label class="pb-label" for="job-batch">배치</label><input class="inp" id="job-batch" type="number" value="4" min="1" max="1024" step="1" required></div>
         </div>
         <div class="field"><label class="pb-label" for="job-freeze">백본 고정</label>
-          <select class="inp" id="job-freeze" style="width:100%"><option value="backbone">예 — 빠르고 적은 데이터에 알맞아요</option><option value="">아니오 — 백본까지 내 데이터에 맞춰요</option></select></div>
+          <select class="inp" id="job-freeze" style="width:100%"><option value="auto">자동 — COCO에 있는 물체면 고정, 없으면 백본까지 맞춰요</option><option value="backbone">예 — 빠르고 적은 데이터에 알맞아요</option><option value="">아니오 — 백본까지 내 데이터에 맞춰요</option></select></div>
         <div class="field"><label class="pb-label" for="job-patience">안 나아지면 멈추기</label>
           <div class="row" style="align-items:center">
             <input class="inp" id="job-patience" type="number" value="15" min="0" step="1" style="flex:none;width:80px">
@@ -537,11 +537,14 @@ function showTrainTask() {
   $("job-task").textContent = text ? T(text) : "";
 }
 $("job-dataset").addEventListener("change", showTrainTask);
-// 수업용: the epochs follow the dataset's size until someone sets them by hand
-$("job-dataset").addEventListener("change", () => {
+// 수업용: the epochs follow the dataset (its size, and whether the backbone
+// will train) until someone sets them by hand
+const followClassroom = () => {
   if (document.querySelector('#presets button.on')?.dataset.preset !== "classroom") return;
   setField("job-epochs", classroomEpochs()); presetHint();
-});
+};
+$("job-dataset").addEventListener("change", followClassroom);
+$("job-freeze").addEventListener("change", followClassroom);
 
 // the server refuses an upload over its limit before reading it, and a browser
 // then often reports only a dropped connection: said here, before sending
@@ -588,7 +591,7 @@ async function refresh() {
     const trainable = datasets.filter((d) => d.labelled > 0);
     const keepDs = $("job-dataset").value;
     $("job-dataset").innerHTML = trainable.map((d) =>
-      `<option value="${d.id}" data-labelled="${d.labelled}">${esc(d.name)} · ${T`라벨 ${d.labelled}/${d.images}`}</option>`).join("");
+      `<option value="${d.id}" data-labelled="${d.labelled}" data-coco-known="${d.coco_known ? 1 : 0}">${esc(d.name)} · ${T`라벨 ${d.labelled}/${d.images}`}</option>`).join("");
     if (keepDs && trainable.some((d) => String(d.id) === keepDs)) $("job-dataset").value = keepDs;
     trainTasks = Object.fromEntries(datasets.map((d) => [String(d.id), d.task]));
     showTrainTask();
@@ -869,17 +872,22 @@ async function autolabelAll(datasetId) {
 // A smaller set needs more epochs, not fewer: on 92-143 pictures 30 epochs left
 // ed-n 0.07-0.2 mAP short of 100 (three seeds each), so the classroom epochs
 // aim at about 1,000 steps — 35 for 300 pictures, up to 100 for a few dozen —
-// and a CPU run stays near the same 10-15 minutes.
-const CLASSROOM_STEPS = 1000;
+// and a CPU run stays near the same 10-15 minutes. A run that trains the
+// backbone too (freeze "auto" on classes COCO does not know, or "") steps
+// 1.27× slower and peaks sooner: 800 steps keep it in the same minutes.
+const CLASSROOM_STEPS = 1000, CLASSROOM_STEPS_UNFROZEN = 800;
 function classroomEpochs() {
   const opt = $("job-dataset").selectedOptions[0];
   const labelled = Number(opt?.dataset.labelled) || 300;
   const batch = Math.max(1, Number($("job-batch").value) || 8);
   const steps = Math.max(1, Math.ceil(Math.max(1, Math.round(labelled * 0.8)) / batch));
-  return Math.min(100, Math.max(35, Math.round(CLASSROOM_STEPS / steps)));
+  const freeze = $("job-freeze").value;
+  const unfrozen = freeze === "" || (freeze === "auto" && opt?.dataset.cocoKnown !== "1");
+  const target = unfrozen ? CLASSROOM_STEPS_UNFROZEN : CLASSROOM_STEPS;
+  return Math.min(100, Math.max(35, Math.round(target / steps)));
 }
 const PRESETS = {
-  classroom: { model: "ed-n", imgsz: 320, epochs: "auto", batch: 8, freeze: "backbone", patience: 25,
+  classroom: { model: "ed-n", imgsz: 320, epochs: "auto", batch: 8, freeze: "auto", patience: 25,
                augment: false, queries: 100, denoising: 30 },
   fast: { model: "ed-s", imgsz: 320, epochs: 30, batch: 8, freeze: "backbone", patience: 10, augment: false,
           queries: "", denoising: "" },
@@ -889,7 +897,8 @@ const PRESETS = {
               queries: "", denoising: "" } };
 function presetHint() {
   $("preset-hint").textContent = [$("job-model").value, `${$("job-imgsz").value}px`, T`${$("job-epochs").value}에폭`,
-    T`배치 ${$("job-batch").value}`, $("job-freeze").value ? T("백본 고정") : "",
+    T`배치 ${$("job-batch").value}`, $("job-freeze").value === "auto" ? T("백본 자동")
+      : $("job-freeze").value ? T("백본 고정") : "",
     Number($("job-patience").value) ? T`${$("job-patience").value}에폭 정체 시 멈춤` : "",
     $("job-augment").checked ? T("증강") : "", $("job-lr").value ? `lr ${$("job-lr").value}` : "",
     $("job-queries").value || $("job-denoising").value

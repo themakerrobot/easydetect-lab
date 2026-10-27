@@ -94,12 +94,13 @@ def test_the_classroom_preset_is_in_the_form_and_picked_without_a_gpu(studio):
     page = client.get("/").text
     assert 'data-preset="classroom">수업용 (CPU)<' in page
     preset = re.search(r"classroom: \{([^}]*)\}", page).group(1)
-    for setting in ('model: "ed-n"', "imgsz: 320", "batch: 8", 'freeze: "backbone"',
+    for setting in ('model: "ed-n"', "imgsz: 320", "batch: 8", 'freeze: "auto"',
                     "queries: 100", "denoising: 30", 'epochs: "auto"', "patience: 25"):
         assert setting in preset, setting
     # the classroom epochs follow the dataset: about 1,000 steps, 35 to 100 epochs
-    assert "const CLASSROOM_STEPS = 1000;" in page
-    assert "Math.min(100, Math.max(35, Math.round(CLASSROOM_STEPS / steps)))" in page
+    assert "const CLASSROOM_STEPS = 1000, CLASSROOM_STEPS_UNFROZEN = 800;" in page
+    assert "Math.min(100, Math.max(35, Math.round(target / steps)))" in page
+    assert '<option value="auto">' in page
     assert 'id="job-queries"' in page and 'id="job-denoising"' in page
     assert "<option>ed-n</option>" in page
     # the first status without a CUDA card presses it
@@ -112,8 +113,8 @@ def test_the_classroom_preset_is_in_the_form_and_picked_without_a_gpu(studio):
 def test_the_lab_asks_for_the_easydetect_that_has_queries():
     import run
 
-    assert run.EASYDETECT_AT_LEAST == "0.7.10"
-    assert "easydetect[train]>=0.7.10" in (ROOT / "requirements.txt").read_text()
+    assert run.EASYDETECT_AT_LEAST == "0.7.11"
+    assert "easydetect[train]>=0.7.11" in (ROOT / "requirements.txt").read_text()
 
 
 # ---------------------------------------------------------------- Pibo

@@ -120,7 +120,7 @@ def main() -> int:
     # the bundle's ed-n-320.pt
     job = post_json("/api/jobs", {
         "dataset_id": dataset["id"], "model": "ed-n", "epochs": 2, "imgsz": 320, "batch": 8,
-        "freeze": "backbone", "patience": 10, "augment": False, "queries": 100,
+        "freeze": "auto", "patience": 10, "augment": False, "queries": 100,
         "denoising": 30, "val_ratio": 0.2})["id"]
     t0 = time.time()
     while True:
@@ -144,6 +144,8 @@ def main() -> int:
             raise SystemExit(message)
         print(f"[smoke] (local run, allowed) {message}")
     assert run.get("queries") == 100 and run.get("denoising") == 30, run
+    # freeze "auto": COCO knows "ball" (sports ball), so the backbone stays frozen
+    assert run.get("freeze") == "backbone", run
 
     # the trained model on a picture (its OpenVINO IR, compiled here)
     body, ctype = multipart({"conf": "0.05"}, {"image": ("t.jpg", (SCRATCH / "test.jpg")
