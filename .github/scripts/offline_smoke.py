@@ -116,9 +116,10 @@ def main() -> int:
     dataset = as_json(call("POST", "/api/datasets", body, ctype))
     print(f"[smoke] dataset {dataset}")
 
-    # 수업용 (CPU), shortened: two epochs at 160 px
+    # 수업용 (CPU), shortened to two epochs; at its 320 px, so it starts from
+    # the bundle's ed-n-320.pt
     job = post_json("/api/jobs", {
-        "dataset_id": dataset["id"], "model": "ed-n", "epochs": 2, "imgsz": 160, "batch": 8,
+        "dataset_id": dataset["id"], "model": "ed-n", "epochs": 2, "imgsz": 320, "batch": 8,
         "freeze": "backbone", "patience": 10, "augment": False, "queries": 100,
         "denoising": 30, "val_ratio": 0.2})["id"]
     t0 = time.time()
@@ -137,8 +138,8 @@ def main() -> int:
     run = info["run"]
     print(f"[smoke] started from {run.get('start')}, queries {run.get('queries')}, "
           f"denoising {run.get('denoising')}, epochs {[e['seconds'] for e in info['epochs_done']]}")
-    if run.get("start", {}).get("kind") != "coco":
-        message = f"ed-n.pt did not come from the bundle's cache: {run.get('start')}"
+    if run.get("start", {}).get("weights") != "ed-n-320":
+        message = f"ed-n-320.pt did not come from the bundle's cache: {run.get('start')}"
         if not LOCAL:
             raise SystemExit(message)
         print(f"[smoke] (local run, allowed) {message}")
@@ -167,7 +168,7 @@ def main() -> int:
                           "--conf", "0"], cwd=here, capture_output=True, text=True,
                          encoding="utf-8", timeout=300)
     print(out.stdout[-1500:], out.stderr[-1500:])
-    assert out.returncode == 0 and "input 160x160, 2 classes (box, ball)" in out.stdout
+    assert out.returncode == 0 and "input 320x320, 2 classes (box, ball)" in out.stdout
     print(f"[smoke] all good in {time.time() - started:.0f} s")
     return 0
 
