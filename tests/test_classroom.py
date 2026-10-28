@@ -346,3 +346,14 @@ def test_detect_py_reads_the_names_and_threshold_inside_a_lone_onnx(tmp_path):
     det = detect.Detector(str(onnx))
     assert det.names == ["cup", "공"] and det.thresholds() == (0.42, 0.7)
     assert det.name_of(1) == "공"
+
+
+def test_a_one_class_set_without_backgrounds_is_warned_about(studio):
+    """A cube model trained on cubes alone called apples cubes: the dataset
+    view says so before training, and how to fix it."""
+    client, _ = studio
+    page = client.get("/").text
+    assert "used.length === 1 && !s.empty_labels.length && s.boxes" in page
+    assert "하나뿐이고 배경 사진이 없어요" in page
+    i18n = client.get("/static/js/i18n.js").text
+    assert "is the only class and no picture is a background" in i18n

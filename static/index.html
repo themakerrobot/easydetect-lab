@@ -823,6 +823,11 @@ async function showStats(datasetId) {
   if (s.unknown_class_boxes) warn.push(T`클래스 범위 밖 ${s.unknown_class_boxes}개`);
   if (s.task === "segment" && s.boxes > s.outlines) warn.push(T`윤곽 없는 상자 ${s.boxes - s.outlines}개`);
   if (s.boxes_without_keypoints) warn.push(T`키포인트 없는 상자 ${s.boxes_without_keypoints}개`);
+  // one class and never a picture without it: the model learns "an object is
+  // there", so it calls other things that class too (a cube model, apples)
+  const used = s.per_class.filter((c) => c.boxes > 0);
+  if (used.length === 1 && !s.empty_labels.length && s.boxes)
+    warn.push(T`클래스가 '${used[0].name}' 하나뿐이고 배경 사진이 없어요. 이 모델은 비슷한 다른 물체도 '${used[0].name}'로 잡을 수 있어요. 다른 물체만 찍힌 사진을 상자 없이 저장해 넣으면 구분하는 법을 배워요.`);
   $("ds-warns").innerHTML = warn.map((w) => `<div>${esc(w)}</div>`).join("");
   scrollToPane();
 }

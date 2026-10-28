@@ -14,7 +14,7 @@
     "PyTorch가 이 GPU를 못 써요. 학습이 CPU로 돌아요. CUDA 빌드 torch를 깔아 주세요 (RTX 50 계열은 cu128 이상).":
       "PyTorch can't use this GPU, so training runs on the CPU. Install a CUDA build of torch (cu128 or newer for the RTX 50 series).",
     "데이터 올리기": "Add data", "상자 그리기": "Draw boxes", "모델 쓰기": "Use the model",
-    "쉬는 중": "Idle", "CPU 전용": "CPU only", "인텔 GPU {0}": "Intel GPU {0}", "#{0} 실행 중": "#{0} running", "대기 {0}": "{0} queued",
+    "쉬는 중": "Idle", "CPU 전용": "CPU only", "클래스가 '{0}' 하나뿐이고 배경 사진이 없어요. 이 모델은 비슷한 다른 물체도 '{1}'로 잡을 수 있어요. 다른 물체만 찍힌 사진을 상자 없이 저장해 넣으면 구분하는 법을 배워요.": "'{0}' is the only class and no picture is a background. The model may call other, similar objects '{1}' too. Pictures of other things saved without a box teach it the difference.", "인텔 GPU {0}": "Intel GPU {0}", "#{0} 실행 중": "#{0} running", "대기 {0}": "{0} queued",
     "사용률": "Load", "메모리": "Memory",
 
     // datasets
