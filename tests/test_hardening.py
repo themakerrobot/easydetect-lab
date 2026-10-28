@@ -480,6 +480,7 @@ def test_a_job_device_reads_as_torch_takes_it():
 def test_gpu_0_on_a_pc_with_an_intel_gpu_is_its_xpu(monkeypatch):
     import torch
     from easydetect import devices
+
     from worker import _torch_device
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
@@ -488,9 +489,10 @@ def test_gpu_0_on_a_pc_with_an_intel_gpu_is_its_xpu(monkeypatch):
 
 
 def test_the_status_names_an_intel_gpu(monkeypatch):
-    import app
     import torch
     from easydetect import devices
+
+    import app
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     monkeypatch.setattr(devices, "xpu_available", lambda: True)
