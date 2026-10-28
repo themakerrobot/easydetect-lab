@@ -1543,7 +1543,7 @@ def _card_facts(job: dict, repo: str, folder: str, files: list[str]) -> dict:
     device = re.search(r"training on (\S+?),", log)
     device = run.get("gpu") or (device.group(1) if device else None)
     gpu = _gpu()
-    if device and device.startswith("cuda") and gpu:
+    if device and device.startswith(("cuda", "xpu")) and gpu:
         device = gpu["name"]
     images = re.search(r"training on \S+?, (\d+) images", log)
 
@@ -1762,15 +1762,21 @@ def _gpu_row(line: str) -> dict:
 
 @functools.lru_cache(maxsize=1)
 def _gpu() -> dict | None:
-    """The CUDA card training will use, if any — asked once, then remembered."""
+    """The GPU training will use, if any — an NVIDIA card (CUDA) or an Intel
+    GPU (XPU, PyTorch's XPU build) — asked once, then remembered."""
     try:
         import torch
+        from easydetect.devices import default_device, device_name, memory_gb
     except ImportError:
         return None
-    if not torch.cuda.is_available():
+    kind = default_device()
+    if kind == "cpu":
         return None
-    props = torch.cuda.get_device_properties(0)
-    return {"name": props.name, "memory_gb": round(props.total_memory / 2**30)}
+    try:
+        device = torch.device(kind, 0)
+        return {"name": device_name(device), "memory_gb": memory_gb(device), "kind": kind}
+    except Exception:       # a driver that says yes and then cannot describe the card
+        return None
 
 
 @app.exception_handler(HTTPException)

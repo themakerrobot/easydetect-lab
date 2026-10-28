@@ -14,7 +14,7 @@
     "PyTorch가 이 GPU를 못 써요. 학습이 CPU로 돌아요. CUDA 빌드 torch를 깔아 주세요 (RTX 50 계열은 cu128 이상).":
       "PyTorch can't use this GPU, so training runs on the CPU. Install a CUDA build of torch (cu128 or newer for the RTX 50 series).",
     "데이터 올리기": "Add data", "상자 그리기": "Draw boxes", "모델 쓰기": "Use the model",
-    "쉬는 중": "Idle", "CPU 전용": "CPU only", "#{0} 실행 중": "#{0} running", "대기 {0}": "{0} queued",
+    "쉬는 중": "Idle", "CPU 전용": "CPU only", "인텔 GPU {0}": "Intel GPU {0}", "#{0} 실행 중": "#{0} running", "대기 {0}": "{0} queued",
     "사용률": "Load", "메모리": "Memory",
 
     // datasets
@@ -27,7 +27,7 @@
     "Roboflow 등 YOLO 형식, 또는 images/ + labels/": "YOLO format as Roboflow exports it, or images/ + labels/",
     "이 서버의 폴더 경로": "Folder path on this server", "클래스": "Classes",
     "쉼표로 나눠요. 비우면 data.yaml을 읽거나 알아서 정해요.": "Comma-separated. Leave empty to read data.yaml or work them out.",
-    "이름": "Name", "자동": "Automatic", "넣을 곳": "Add to", "새 데이터셋": "New dataset",
+    "이름": "Name", "자동": "Automatic", "인텔 GPU": "Intel GPU", "넣을 곳": "Add to", "새 데이터셋": "New dataset",
     "데이터 추가": "Add data", "내 데이터셋": "My datasets",
     "카드 메뉴에서 '병합 선택'으로 두 개 이상 골라요": "Tick 'Select to merge' in two or more card menus",
     "선택 병합": "Merge selected", "선택 병합 ({0})": "Merge selected ({0})",

@@ -2,6 +2,9 @@ name: offline-bundle
 
 # easydetect-lab-offline-win64.zip: the lab for a classroom laptop with no
 # internet and no NVIDIA GPU. Unzip, double-click start-lab-offline.bat.
+# easydetect-lab-offline-win64-intel-gpu.zip is the same with PyTorch's XPU
+# build, which trains on an Intel GPU (Arc, the Arc graphics of Core Ultra
+# laptops) when its driver is installed, and on the CPU otherwise.
 # Inside: CPython 3.11 (the python.org NuGet package: a full, relocatable
 # install where pip works as usual, unlike the embeddable zip), PyTorch CPU,
 # easydetect and the lab's requirements, the lab itself, and easydetect's
@@ -32,13 +35,18 @@ concurrency:
 
 env:
   PY_VERSION: "3.11.9"     # the last 3.11 with a binary (NuGet) release
-  NAME: easydetect-lab-offline
-  ZIP: easydetect-lab-offline-win64.zip
 
 jobs:
   bundle:
     runs-on: windows-latest
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        torch: [cpu, xpu]          # xpu: PyTorch for Intel GPUs
+    env:
+      NAME: ${{ matrix.torch == 'xpu' && 'easydetect-lab-offline-intel' || 'easydetect-lab-offline' }}
+      ZIP: ${{ matrix.torch == 'xpu' && 'easydetect-lab-offline-win64-intel-gpu.zip' || 'easydetect-lab-offline-win64.zip' }}
     defaults:
       run:
         shell: pwsh
@@ -61,12 +69,12 @@ jobs:
           "ROOT=$root" >> $env:GITHUB_ENV
           "PY=$py" >> $env:GITHUB_ENV
 
-      - name: PyTorch (CPU), easydetect and the lab's requirements
+      - name: PyTorch (${{ matrix.torch }}), easydetect and the lab's requirements
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $env:PIP_NO_CACHE_DIR = "1"
           & $env:PY -m pip install --no-warn-script-location torch torchvision `
-              --index-url https://download.pytorch.org/whl/cpu
+              --index-url https://download.pytorch.org/whl/${{ matrix.torch }}
           & $env:PY -m pip install --no-warn-script-location -r requirements.txt
           # OpenVINO phones home from its model converter (each export); offline
           # that is a wait for nothing. It falls back to a stub without this package.
@@ -151,6 +159,9 @@ jobs:
           Push-Location (Split-Path $env:ROOT)
           7z a -tzip -mx=5 -bso0 -bsp0 (Join-Path $env:GITHUB_WORKSPACE $env:ZIP) $env:NAME
           Pop-Location
+          # a release takes files up to 2 GiB
+          if ((Get-Item $env:ZIP).Length -ge 2GB) {
+            Write-Error ("$env:ZIP is {0:N0} MB, over the 2 GiB a release file may be" -f ((Get-Item $env:ZIP).Length / 1MB)); exit 1 }
           function Size($p) { "{0,8:N0} MB" -f ((Get-ChildItem -Recurse -File $p | Measure-Object Length -Sum).Sum / 1MB) }
           $sp = Join-Path $env:ROOT "python\Lib\site-packages"
           $report = @(

@@ -144,7 +144,7 @@
             <div><label class="pb-label" for="job-denoising">디노이징 쿼리</label><input class="inp" id="job-denoising" type="number" step="1" min="0" max="100" placeholder="자동 (100)"></div>
             <div class="wide hint" style="margin-top:0">줄이면 한 스텝이 가벼워져요. 100 · 30이면 CPU에서 약 2배 빨라요. 한 사진에 물체가 몇 개뿐일 때 알맞고, 모델은 이 쿼리 수로 돌아요(내보낸 파일도).</div>
             <div class="wide"><label class="pb-label" for="job-device">장치</label>
-              <select class="inp" id="job-device"><option value="">자동</option><option value="cpu">CPU</option><option value="0">GPU 0</option></select></div>
+              <select class="inp" id="job-device"><option value="">자동</option><option value="cpu">CPU</option><option value="0">GPU 0</option><option value="xpu">인텔 GPU</option></select></div>
           </div>
           <div class="pb-label" style="margin-top:12px">옵티마이저</div>
           <div class="hint" style="margin-top:0">비워 두면 easydetect가 정해요. 바꾼 칸은 파란 테두리로 보여요.</div>
@@ -564,20 +564,25 @@ async function refresh() {
   const live = jobs.find((j) => j.id === state.running_job);
   const pct = live && live.progress ? ` ${Math.round(live.progress * 100)}%` : "";
   $("status").textContent = [state.running_job ? T`#${state.running_job} 실행 중` + pct : T("쉬는 중"),
-    state.queued ? T`대기 ${state.queued}` : "", state.gpu || smiSeen ? "" : T("CPU 전용")].filter(Boolean).join(" · ");
+    state.queued ? T`대기 ${state.queued}` : "",
+    state.gpu?.kind === "xpu" ? T`인텔 GPU ${state.gpu.name}` : state.gpu || smiSeen ? "" : T("CPU 전용")]
+    .filter(Boolean).join(" · ");
   $("status").title = $("status").textContent;      // whole, where a phone cuts it short
   $("status").classList.toggle("ok", !state.running_job);
   // a tab in the background still says how far the run is
   document.title = pct ? `${pct.trim()} · easydetect lab` : "easydetect lab";
   $("gpu-warn").hidden = !(smiSeen && !state.gpu);   // the driver sees a card PyTorch cannot use
-  if (state.gpu && !gpu) {                 // a GPU wants batches a CPU could not hold
+  // a laptop's Intel GPU shares the memory and is far from a desktop card:
+  // it keeps the 수업용 batch, preset and epochs, only trained faster
+  if (state.gpu && state.gpu.kind !== "xpu" && !gpu) {   // a GPU wants bigger batches
     gpu = state.gpu;
     if ($("job-batch").value === "4" && !touched.has("job-batch")) $("job-batch").value = "16";
     presetHint();
   }
   if (!presetPicked) {                     // no CUDA card: training runs on the CPU
     presetPicked = true;
-    if (!state.gpu) document.querySelector('#presets button[data-preset="classroom"]').click();
+    if (!state.gpu || state.gpu.kind === "xpu")
+      document.querySelector('#presets button[data-preset="classroom"]').click();
   }
   $("n-data").textContent = datasets.length;
   $("n-models").textContent = registry.models.length;

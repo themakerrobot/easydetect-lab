@@ -106,16 +106,29 @@ def _release_memory() -> None:
     for anything else on the card, until the process ends."""
     gc.collect()
     torch = sys.modules.get("torch")        # a job that never imported it holds no VRAM
-    if torch is not None and torch.cuda.is_available():
+    if torch is None:
+        return
+    if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    xpu = getattr(torch, "xpu", None)       # an Intel GPU (PyTorch's XPU build)
+    try:
+        if xpu is not None and xpu.is_available():
+            xpu.empty_cache()
+    except Exception:  # a build without a working driver raises instead of saying no
+        pass
 
 
 def _torch_device(device: str | None) -> str | None:
-    """A job's device as torch takes it: "0" is "cuda:0"; None lets torch pick."""
+    """A job's device as torch takes it: "0" is the first GPU (CUDA, or an
+    Intel GPU's XPU when that is what this PC has); None lets torch pick."""
     device = str(device or "").strip()
     if not device:
         return None
-    return f"cuda:{device}" if device.isdigit() else device
+    if device.isdigit():
+        from easydetect.model import _torch_device as torch_device
+
+        return torch_device(device)
+    return device
 
 
 #: pictures per batch when scoring a run — validation only reads, so it fits
@@ -616,7 +629,10 @@ class Worker(threading.Thread):
         from easydetect.validator import validate_torch
 
         device = _torch_device(parent.get("device"))
-        if device and device.startswith("cuda") and not torch.cuda.is_available():
+        from easydetect.devices import xpu_available
+
+        if device and ((device.startswith("cuda") and not torch.cuda.is_available())
+                       or (device.startswith("xpu") and not xpu_available())):
             device = "cpu"                   # trained on a card this machine no longer has
         found: list = []
 
