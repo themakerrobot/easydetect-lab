@@ -301,8 +301,8 @@
           <div class="menu-list">
             <button id="dl-weights">best.pt <span class="dim">PyTorch</span></button>
             <button id="dl-ir">OpenVINO IR <span class="dim">zip</span></button>
-            <button id="dl-onnx">ONNX <span class="dim">zip</span></button>
-            <button id="dl-pibo" title="클래스 이름과 확신 기준이 들어 있는 모델 파일 하나 — 파이보에 그대로 넣어요">Pibo로 보내기 <span class="dim">.onnx</span></button>
+            <button id="dl-model" title="클래스 이름과 확신 기준이 들어 있는 모델 파일 하나 — 파이보·라즈베리파이·PC에서 onnxruntime으로 그대로 써요">ONNX 파일 하나 <span class="dim">.onnx</span></button>
+            <button id="dl-onnx" title="모델 .onnx와 클래스 이름 파일, 윤곽·키포인트 모델까지 함께">ONNX 묶음 <span class="dim">zip</span></button>
             <button id="dl-csv">results.csv</button>
             <button id="dl-log">로그</button>
             <button id="dl-pred">결과 이미지 zip</button>
@@ -1195,14 +1195,14 @@ function render(job) {
     evaluate: train && has("weights") && !active,
     resume: train && !active,
     "dl-weights": has("weights"), "dl-ir": has("openvino"), "dl-onnx": has("onnx"),
-    "dl-pibo": train && has("weights") && !active,
+    "dl-model": train && has("weights") && !active,
     "dl-csv": has("results"),
     "dl-log": has("log"), "dl-pred": has("predictions"), "dl-video": has("video"),
     register: train && has("weights") && !active,
     "delete-job": !live,
   };
   Object.entries(show).forEach(([id, on]) => { $(id).hidden = !on; });
-  $("downloads").hidden = !["dl-weights", "dl-ir", "dl-onnx", "dl-pibo", "dl-csv", "dl-log", "dl-pred", "dl-video"].some((id) => show[id]);
+  $("downloads").hidden = !["dl-weights", "dl-ir", "dl-onnx", "dl-model", "dl-csv", "dl-log", "dl-pred", "dl-video"].some((id) => show[id]);
   $("try-row").hidden = !(train && has("weights"));
 
   // a run that ended before its first epoch has no curve to show
@@ -1593,15 +1593,15 @@ async function saveFrom(url, msg = "detail-msg") {
 }
 const download = (kind) => async () => {
   $("downloads").open = false;
-  if (await saveFrom(`/api/jobs/${current}/download/${kind}`) && kind === "pibo")
-    say("detail-msg", T("Pibo용 모델 파일을 받았어요"), "ok");
+  if (await saveFrom(`/api/jobs/${current}/download/${kind}`) && kind === "model")
+    say("detail-msg", T("모델 파일(.onnx)을 받았어요"), "ok");
 };
 $("dl-weights").onclick = download("weights");
 $("dl-ir").onclick = download("openvino");
 $("dl-onnx").onclick = download("onnx");
-$("dl-pibo").onclick = () => {      // exports model.onnx first: a few seconds
-  say("detail-msg", T("Pibo용 모델 파일을 만드는 중이에요. 몇 초 걸려요"), "ok");
-  download("pibo")();
+$("dl-model").onclick = () => {     // exports model.onnx first: a few seconds
+  say("detail-msg", T("모델 파일(.onnx)을 만드는 중이에요. 몇 초 걸려요"), "ok");
+  download("model")();
 };
 $("dl-csv").onclick = download("results");
 $("dl-log").onclick = download("log");

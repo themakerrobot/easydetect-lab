@@ -1,5 +1,5 @@
 # Apache-2.0
-"""The classroom path: the 수업용 (CPU) preset's settings, and "Pibo로 보내기"."""
+"""The classroom path: the 수업용 (CPU) preset's settings, and "ONNX 파일 하나"."""
 
 from __future__ import annotations
 
@@ -109,7 +109,8 @@ def test_the_classroom_preset_is_in_the_form_and_picked_without_a_gpu(studio):
                      r'document\.querySelector\(\'#presets button\[data-preset="classroom"\]'
                      r'\'\)\.click\(\)', page)
     i18n = client.get("/static/js/i18n.js").text
-    assert '"수업용 (CPU)": "Classroom (CPU)"' in i18n and '"Pibo로 보내기": "Send to Pibo"' in i18n
+    assert '"수업용 (CPU)": "Classroom (CPU)"' in i18n
+    assert '"ONNX 파일 하나": "One ONNX file"' in i18n
 
 
 def test_the_lab_asks_for_the_easydetect_that_has_queries():
@@ -179,14 +180,14 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
 
     shown = client.get(f"/api/jobs/{job}").json()
     assert "weights" in shown["artifacts"]
-    response = client.get(f"/api/jobs/{job}/download/pibo")
+    response = client.get(f"/api/jobs/{job}/download/model")
     assert response.status_code == 200, response.text
-    assert f'filename="pibo-job{job}.onnx"' in response.headers["content-disposition"]
+    assert f'filename="job{job}.onnx"' in response.headers["content-disposition"]
     here = tmp_path / "pibo"            # on the robot: the file and detect.py, nothing else
     here.mkdir()
-    (here / f"pibo-job{job}.onnx").write_bytes(response.content)
+    (here / f"job{job}.onnx").write_bytes(response.content)
     shutil.copy(Path(__file__).resolve().parents[1] / "pibo" / "detect.py", here)
-    meta = ort_meta(here / f"pibo-job{job}.onnx")
+    meta = ort_meta(here / f"job{job}.onnx")
     assert json.loads(meta["easydetect.names"]) == {"0": "cup", "1": "공"}
     assert "easydetect.conf" not in meta or 0.25 <= float(meta["easydetect.conf"]) <= 0.7
     # the run's file is written whole or not at all: nothing half-done is left
@@ -194,7 +195,7 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
 
     import onnxruntime as ort
 
-    session = ort.InferenceSession(str(here / f"pibo-job{job}.onnx"),
+    session = ort.InferenceSession(str(here / f"job{job}.onnx"),
                                    providers=["CPUExecutionProvider"])
     assert session.get_inputs()[0].shape == [1, 3, 160, 160]       # the run's input size
     assert session.get_outputs()[1].shape[1] == 100                # the trained query count
@@ -219,7 +220,7 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
     # called the way openpibo calls its YoloOnnx: Detect.object_detector = Detector(...)
     import cv2
 
-    det = detect.Detector(str(here / f"pibo-job{job}.onnx"), imgsz=320)
+    det = detect.Detector(str(here / f"job{job}.onnx"), imgsz=320)
     img = cv2.imread(str(picture))
     boxes, scores, classes = det(img, conf=0.5, iou=0.4)
     assert boxes.shape[1] == 4 and len(boxes) == len(scores) == len(classes)
@@ -232,6 +233,7 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
 
     # the model is exported once per best.pt and then reused
     stamp = (run / "pibo" / "model.onnx").stat().st_mtime_ns
+    # "pibo", the name it had before, still answers
     assert client.get(f"/api/jobs/{job}/download/pibo").status_code == 200
     assert (run / "pibo" / "model.onnx").stat().st_mtime_ns == stamp
 

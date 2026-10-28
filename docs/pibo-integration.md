@@ -10,8 +10,8 @@ ed 모델로 바꾸는 작업 지시서다.
 - 모델은 **`.onnx` 파일 하나**다. 두 종류를 같은 방법으로 읽는다.
   1. **기본 COCO 모델**: COCO 80 클래스, Hugging Face `leeyunjai/themaker`의
      `.model/object/ed-s-320.onnx`. 지금 yolo11s.onnx가 있던 자리다.
-  2. **lab에서 학습한 모델**: easydetect lab의 *다운로드 → Pibo로 보내기*로 받은
-     `pibo-job<번호>.onnx`.
+  2. **lab에서 학습한 모델**: easydetect lab의 *다운로드 → ONNX 파일 하나*로 받은
+     `job<번호>.onnx`.
 - 설정으로 어느 파일을 쓸지 고른다. 비어 있으면 기본 COCO 모델이다.
 - 더 좋은 COCO 모델이 학습되면 같은 이름의 파일만 바뀐다. 코드는 그대로다.
 
@@ -113,7 +113,7 @@ ed-s-320은 yolo11s보다 정확하고 1.36배 느리다. 정확도를 택했다
 - [ ] yolo11s 코드와 파일이 없다. 저장소와 이미지에서 `yolo`를 검색해 남은 게 없다.
 - [ ] 설정 없이 `ed-s-320.onnx`로 `detect_object(img)`가 사람·컵 등을
   이름·점수·상자로 돌려준다.
-- [ ] lab에서 받은 `pibo-job<번호>.onnx`(한글 클래스 포함)를 고르면 그 모델로
+- [ ] lab에서 받은 `job<번호>.onnx`(한글 클래스 포함)를 고르면 그 모델로
   인식하고, 이름이 한글로 나오고 화면에도 한글로 그려진다.
 - [ ] 입력 크기가 다른 파일(예: 640으로 학습한 lab 모델)도 코드 수정 없이 읽힌다.
 - [ ] lab 모델의 확신 기준(`easydetect.conf`)이 쓰인다. openpibo가 0.5를 넘겨도 마찬가지다.

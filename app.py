@@ -1444,8 +1444,8 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
                 bundle.writestr("README.md", _card(job, repo, folder_in_repo,
                                                    [p.name for p in files]))
         return FileResponse(archive, filename=f"job{job_id}-{kind}.zip")
-    if kind == "pibo":
-        return _pibo_model(job, run_dir)
+    if kind in ("model", "pibo"):            # "pibo": the name it had before
+        return _one_onnx(job, run_dir)
     if kind == "huggingface":
         return _hub_bundle(job, repo, folder_in_repo, pt)
     if kind == "results":
@@ -1473,9 +1473,9 @@ def download(job_id: int, kind: str, repo: str | None = None, folder: str | None
     raise HTTPException(404, "모르는 파일 종류예요")
 
 
-def _pibo_model(job: dict, run_dir: Path):
-    """"Pibo로 보내기": one .onnx with the class names and the score threshold
-    inside it — what the robot loads in place of its COCO model."""
+def _one_onnx(job: dict, run_dir: Path):
+    """"ONNX 파일 하나": one .onnx with the class names and the score threshold
+    inside it — what Pibo, a Raspberry Pi or a PC runs with onnxruntime alone."""
     import pibo_export
 
     if job["kind"] != "train" or not (run_dir / "weights" / "best.pt").exists():
@@ -1485,7 +1485,7 @@ def _pibo_model(job: dict, run_dir: Path):
         data_yaml = Path(dataset["path"]) / "data.yaml" if dataset else None
         archive = pibo_export.build(job, run_dir, data_yaml)
     except Exception as exc:  # a broken checkpoint, a full disk: say which
-        raise HTTPException(500, f"Pibo용 모델 파일을 만들지 못했어요: {exc}") from exc
+        raise HTTPException(500, f"모델 파일을 만들지 못했어요: {exc}") from exc
     return FileResponse(archive, filename=archive.name, media_type="application/octet-stream")
 
 

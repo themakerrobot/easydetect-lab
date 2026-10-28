@@ -1,5 +1,5 @@
 # Apache-2.0
-""""Pibo로 보내기": a finished run as one .onnx file the robot runs with
+""""ONNX 파일 하나": a finished run as one .onnx file Pibo (or any PC) runs with
 numpy, OpenCV and ONNX Runtime alone.
 
 The file is exported from ``best.pt`` at the run's input size and carries
@@ -145,7 +145,7 @@ def _write_atomic(path: Path, data: bytes) -> None:
 
 
 def build(job: dict, run_dir: Path, data_yaml: Path | None = None) -> Path:
-    """The one file Pibo needs for job ``job``: ``pibo-job<id>.onnx`` in ``run_dir``,
+    """The one model file for job ``job``: ``job<id>.onnx`` in ``run_dir``,
     with the class names and the picked score threshold inside it.
 
     Written under a temporary name and moved into place: a download that
@@ -158,8 +158,8 @@ def build(job: dict, run_dir: Path, data_yaml: Path | None = None) -> Path:
         raise FileNotFoundError(weights)
     imgsz = int(job.get("imgsz") or DEFAULT_IMGSZ)
     onnx, meta = export_onnx(weights, run_dir / "pibo", imgsz, data_yaml)
-    target = run_dir / f"pibo-job{job['id']}.onnx"
-    tmp = run_dir / f".pibo-job{job['id']}.{os.getpid()}.{threading.get_ident()}.onnx"
+    target = run_dir / f"job{job['id']}.onnx"
+    tmp = run_dir / f".job{job['id']}.{os.getpid()}.{threading.get_ident()}.onnx"
     try:
         shutil.copyfile(onnx, tmp)
         conf = meta.get("conf")
