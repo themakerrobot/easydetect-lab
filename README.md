@@ -49,6 +49,18 @@ install the CUDA build into that folder once:
 .venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
+On a PC with an Intel GPU (Arc, or the Arc graphics of a Core Ultra laptop:
+Lunar Lake, Meteor Lake) and its current driver, PyTorch's XPU build trains
+on it; the status bar then says *인텔 GPU …* instead of *CPU 전용*:
+
+```bat
+.venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
+```
+
+Training picks an NVIDIA card first, then an Intel GPU, then the CPU; the
+device field (고급 설정 → 장치) can name one. The NPU runs models but cannot
+train them; predicting already uses the Intel GPU or NPU through OpenVINO.
+
 To use a Python you already have (a conda env, say) instead of `.venv`,
 `set LAB_PYTHON=C:\path\to\python.exe` before running it.
 
@@ -59,7 +71,10 @@ To use a Python you already have (a conda env, say) instead of `.venv`,
 `.github/workflows/offline-bundle.yml`) holds Python 3.11, PyTorch for the
 CPU, easydetect, the lab and the weights training starts from. Unzip it and
 double-click `start-lab-offline.bat`: nothing is installed and nothing is
-downloaded. Without a CUDA GPU the training form starts on the **Classroom
+downloaded. On laptops with an Intel GPU, take
+`easydetect-lab-offline-win64-intel-gpu.zip` instead: the same, with
+PyTorch's XPU build, so training runs on the GPU (and on the CPU where there
+is none). Without a CUDA GPU the training form starts on the **Classroom
 (CPU)** goal — ed-n at 320 px, 100 queries and 30 denoising queries
 (`train(queries=, denoising=)`, about twice as fast a step on a CPU), the
 backbone frozen, and epochs set from the dataset: about 1,000 steps, so 35
@@ -381,7 +396,8 @@ its `platform.db`.
 `pip install -U "easydetect[train]"`입니다. 예전 `platform/` 시절 데이터는
 `python run.py --data <easydetect-platform 폴더>`로 그대로 씁니다.
 인터넷 없는 교실에서는 릴리스의 `easydetect-lab-offline-win64.zip`을 풀고
-`start-lab-offline.bat`을 더블클릭합니다. GPU가 없으면 학습 목표가 **수업용
+`start-lab-offline.bat`을 더블클릭합니다. 인텔 GPU가 있는 노트북(Core Ultra 등)은
+`easydetect-lab-offline-win64-intel-gpu.zip`을 쓰면 학습이 GPU에서 돌아갑니다. GPU가 없으면 학습 목표가 **수업용
 (CPU)** 로 정해지고, 에폭은 데이터 크기에 맞춰 정해집니다(300장이면 35에폭, 수십
 장이면 100에폭까지; 노트북에서 10~15분 안팎). 사과·컵처럼 COCO에 있는 물체는
 COCO가 아는 것에서 시작해 적은 사진으로도 잘 배웁니다. 끝난 학습은 *다운로드 →

@@ -18,7 +18,9 @@
 
 1. [Releases](https://github.com/themakerrobot/easydetect-lab/releases)에서
    `easydetect-lab-offline-win64.zip`을 받아요. 한 번 받아서 USB 메모리로
-   학생 PC에 복사해도 돼요.
+   학생 PC에 복사해도 돼요. 인텔 GPU가 있는 노트북(Core Ultra, Arc 그래픽)이면
+   `easydetect-lab-offline-win64-intel-gpu.zip`을 받으세요. 학습이 GPU에서 돌아
+   더 빠르고, 화면 위쪽에 *인텔 GPU …* 라고 나와요. GPU 드라이버는 최신이어야 해요.
 2. (권장) zip 파일을 오른쪽 클릭 → **속성** → 아래쪽 **차단 해제** 체크 → 확인.
    인터넷에서 받은 파일이라는 표시가 풀린 파일마다 붙어서, 실행할 때 경고가 뜨는
    것을 막아 줘요.

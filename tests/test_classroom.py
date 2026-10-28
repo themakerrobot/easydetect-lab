@@ -104,8 +104,10 @@ def test_the_classroom_preset_is_in_the_form_and_picked_without_a_gpu(studio):
     assert 'id="job-queries"' in page and 'id="job-denoising"' in page
     assert "<option>ed-n</option>" in page
     # the first status without a CUDA card presses it
-    assert re.search(r'if \(!state\.gpu\) document\.querySelector\(\'#presets '
-                     r'button\[data-preset="classroom"\]\'\)\.click\(\)', page)
+    # (an Intel GPU too: a laptop's, sharing its memory, trains the 수업용 way)
+    assert re.search(r'if \(!state\.gpu \|\| state\.gpu\.kind === "xpu"\)\s*'
+                     r'document\.querySelector\(\'#presets button\[data-preset="classroom"\]'
+                     r'\'\)\.click\(\)', page)
     i18n = client.get("/static/js/i18n.js").text
     assert '"수업용 (CPU)": "Classroom (CPU)"' in i18n and '"Pibo로 보내기": "Send to Pibo"' in i18n
 
@@ -113,8 +115,8 @@ def test_the_classroom_preset_is_in_the_form_and_picked_without_a_gpu(studio):
 def test_the_lab_asks_for_the_easydetect_that_has_queries():
     import run
 
-    assert run.EASYDETECT_AT_LEAST == "0.7.11"
-    assert "easydetect[train]>=0.7.11" in (ROOT / "requirements.txt").read_text()
+    assert run.EASYDETECT_AT_LEAST == "0.7.12"
+    assert "easydetect[train]>=0.7.12" in (ROOT / "requirements.txt").read_text()
 
 
 # ---------------------------------------------------------------- Pibo

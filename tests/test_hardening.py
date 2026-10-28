@@ -462,9 +462,10 @@ def test_the_worker_hands_memory_back_after_every_job(tmp_path, monkeypatch):
     freed = []
     monkeypatch.setattr(worker_module.gc, "collect", lambda: freed.append("gc"))
     cuda = SimpleNamespace(is_available=lambda: True, empty_cache=lambda: freed.append("cuda"))
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=cuda))
+    xpu = SimpleNamespace(is_available=lambda: True, empty_cache=lambda: freed.append("xpu"))
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=cuda, xpu=xpu))
     w.run()                                   # one job, then the stop it asked for
-    assert freed == ["gc", "cuda"]
+    assert freed == ["gc", "cuda", "xpu"]
     assert db.one("SELECT status FROM jobs WHERE id = ?", (job,))["status"] == "failed"
 
 
@@ -473,7 +474,33 @@ def test_a_job_device_reads_as_torch_takes_it():
 
     assert _torch_device(None) is None and _torch_device("") is None
     assert _torch_device("0") == "cuda:0" and _torch_device("cpu") == "cpu"
-    assert _torch_device("cuda:1") == "cuda:1"
+    assert _torch_device("cuda:1") == "cuda:1" and _torch_device("xpu") == "xpu"
+
+
+def test_gpu_0_on_a_pc_with_an_intel_gpu_is_its_xpu(monkeypatch):
+    import torch
+    from easydetect import devices
+    from worker import _torch_device
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(devices, "xpu_available", lambda: True)
+    assert _torch_device("0") == "xpu:0"
+
+
+def test_the_status_names_an_intel_gpu(monkeypatch):
+    import app
+    import torch
+    from easydetect import devices
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(devices, "xpu_available", lambda: True)
+    monkeypatch.setattr(devices, "device_name", lambda d: "Intel(R) Arc(TM) 140V GPU")
+    monkeypatch.setattr(devices, "memory_gb", lambda d: 16)
+    app._gpu.cache_clear()
+    try:
+        assert app._gpu() == {"name": "Intel(R) Arc(TM) 140V GPU", "memory_gb": 16, "kind": "xpu"}
+    finally:
+        app._gpu.cache_clear()
 
 
 @pytest.fixture

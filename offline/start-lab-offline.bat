@@ -1,6 +1,7 @@
 @echo off
 rem easydetect lab, offline bundle - double-click to start it on Windows.
-rem Nothing here needs the internet: Python, PyTorch (CPU), the lab and the
+rem Nothing here needs the internet: Python, PyTorch (CPU, or the Intel GPU
+rem build in the -intel-gpu zip), the lab and the
 rem model weights it starts from are all inside this folder, and the lab is
 rem told never to reach for the network. Unzip the whole zip first; started
 rem from inside the zip, Windows copies only this file out and nothing works.
