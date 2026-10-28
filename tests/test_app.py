@@ -579,6 +579,31 @@ def test_the_preview_endpoint_refuses_what_it_cannot_read(studio):
     assert unreadable.status_code == 400
 
 
+def test_korean_class_names_survive_the_detections_header(studio, monkeypatch):
+    """Headers are latin-1: a class called 코끼리 once made "try this model" a 500."""
+    client, module = studio
+    found = [{"name": "코끼리", "class": 0, "confidence": 0.9,
+              "box": {"x1": 1, "y1": 2, "x2": 3, "y2": 4}}]
+
+    class Result:
+        def plot(self):
+            return np.zeros((8, 8, 3), np.uint8)
+
+        def summary(self):
+            return found
+
+    class Fake:
+        def __call__(self, frame, **kwargs):
+            return [Result()]
+
+    monkeypatch.setattr(module, "_model", lambda name, task="detect": Fake())
+    response = client.post("/api/preview", data={"model": "ed-s"},
+                           files={"image": ("f.jpg", image_bytes(), "image/jpeg")})
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Detections"].isascii()
+    assert json.loads(response.headers["X-Detections"]) == found
+
+
 def test_the_overlap_filters_reach_predict(studio, tmp_path, monkeypatch, open_paths):
     """The webcam's IoU slider and merge box arrive as predict()'s iou and contain."""
     client, module = studio

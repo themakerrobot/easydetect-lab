@@ -1668,7 +1668,7 @@ def predict(job_id: int, image: UploadFile = None, conf: float = Form(0.5)):
     return StreamingResponse(
         io.BytesIO(buffer.tobytes()),
         media_type="image/jpeg",
-        headers={"X-Detections": json.dumps(result.summary(), ensure_ascii=False)},
+        headers={"X-Detections": _detections_header(result)},
     )
 
 
@@ -1694,7 +1694,7 @@ def preview(model: str = Form(...), conf: float = Form(0.5), image: UploadFile =
     return StreamingResponse(
         io.BytesIO(buffer.tobytes()),
         media_type="image/jpeg",
-        headers={"X-Detections": json.dumps(result.summary(), ensure_ascii=False)},
+        headers={"X-Detections": _detections_header(result)},
     )
 
 
@@ -1785,6 +1785,13 @@ def http_error(_request, exc: HTTPException):
 
 
 # ------------------------------------------------------------------ helpers
+
+
+def _detections_header(result) -> str:
+    """The boxes as JSON for the X-Detections header. Headers are latin-1, so
+    class names in Korean (or any non-ASCII) go as \\u escapes; JSON.parse in
+    the page reads them back."""
+    return json.dumps(result.summary(), ensure_ascii=True)
 
 
 def _decode_upload(image: UploadFile | None):
