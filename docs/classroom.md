@@ -85,12 +85,12 @@ zip 안에는 Python, PyTorch(CPU), easydetect, lab, 그리고 학습이 시작�
 
 ## 모델을 Pibo로 옮기기
 
-1. 학습이 끝난 작업을 열고 **다운로드 → Pibo로 보내기** 를 눌러요.
-   `pibo-job<번호>.onnx` 파일 **하나**가 받아져요(몇 초 걸려요). 클래스 이름과
+1. 학습이 끝난 작업을 열고 **다운로드 → ONNX 파일 하나** 를 눌러요.
+   `job<번호>.onnx` 파일 **하나**가 받아져요(몇 초 걸려요). 클래스 이름과
    이 모델의 **확신 기준**이 파일 안에 들어 있어요. 확신 기준은 검증 사진에서
    놓치는 것과 잘못 찾는 것이 함께 가장 적었던 점수(0.25~0.70)예요.
 2. 파일을 Pibo로 복사해요(USB 메모리, 또는 같은 와이파이라면
-   `scp pibo-job3.onnx pi@<Pibo IP>:~/`).
+   `scp job3.onnx pi@<Pibo IP>:~/`).
 3. Pibo의 사물 인식 설정에서 이 파일을 모델로 고르면, 기본 COCO 모델 대신 이
    모델로 인식해요.
 
@@ -98,8 +98,8 @@ zip 안에는 Python, PyTorch(CPU), easydetect, lab, 그리고 학습이 시작�
 복사하고 Pibo에서 이렇게 해요.
 
 ```
-python3 detect.py 사진.jpg --model pibo-job3.onnx   # 찾은 것을 글로 보여 줘요
-python3 detect.py 0 --model pibo-job3.onnx          # 카메라 0번으로 계속, Ctrl+C로 멈춤
+python3 detect.py 사진.jpg --model job3.onnx   # 찾은 것을 글로 보여 줘요
+python3 detect.py 0 --model job3.onnx          # 카메라 0번으로 계속, Ctrl+C로 멈춤
 ```
 
 `detect.py`는 numpy, OpenCV, onnxruntime만 써요(easydetect·torch 불필요). lab의

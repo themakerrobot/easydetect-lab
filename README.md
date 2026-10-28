@@ -305,7 +305,7 @@ The pages are only clients of these, so a script can do anything the UI does:
 | `POST /api/jobs/{id}/evaluate` | `{conf}` — queue a scoring pass with pictures |
 | `GET /api/jobs/{id}/report` · `/eval/{name}` | the numbers, and the pictures |
 | `GET /api/jobs/{id}/download/{weights,openvino,onnx,results,log,predictions,video}` | |
-| `GET /api/jobs/{id}/download/pibo` | `pibo-job<id>.onnx` at the run's input size, with the class names and the score threshold with the best F1 on validation inside it (ONNX metadata `easydetect.names`, `easydetect.conf`); `pibo/detect.py` runs it with numpy, OpenCV and onnxruntime alone |
+| `GET /api/jobs/{id}/download/model` (also `/pibo`) | "ONNX 파일 하나": `job<id>.onnx` at the run's input size, with the class names and the score threshold with the best F1 on validation inside it (ONNX metadata `easydetect.names`, `easydetect.conf`); `pibo/detect.py` runs it with numpy, OpenCV and onnxruntime alone |
 | `GET /api/jobs/{id}/download/huggingface` | `?repo=&folder=&pt=` — the upload folder, zipped, with its README |
 | `GET /api/jobs/{id}/modelcard` | the README.md that bundle would carry, and where it would go |
 | `POST /api/jobs/{id}/predict` | multipart: `image`, `conf` → annotated JPEG |
@@ -401,7 +401,7 @@ its `platform.db`.
 (CPU)** 로 정해지고, 에폭은 데이터 크기에 맞춰 정해집니다(300장이면 35에폭, 수십
 장이면 100에폭까지; 노트북에서 10~15분 안팎). 사과·컵처럼 COCO에 있는 물체는
 COCO가 아는 것에서 시작해 적은 사진으로도 잘 배웁니다. 끝난 학습은 *다운로드 →
-Pibo로 보내기*로 로봇에 옮기고, 라즈베리파이 4B에서 한 장에 약 0.16초입니다.
+ONNX 파일 하나*로 받아 파이보 같은 기기에 옮기고, 라즈베리파이 4B에서 한 장에 약 0.16초입니다.
 선생님용 안내: [docs/classroom.md](docs/classroom.md).
 추론 화면의 *물체 윤곽 칠하기*를 켜면 상자마다 마스크를 칠합니다(MobileSAM, 처음
 한 번 44 MB 내려받음, CPU에서 한 장에 약 150 ms + 상자당 25 ms).

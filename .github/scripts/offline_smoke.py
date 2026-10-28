@@ -160,12 +160,12 @@ def main() -> int:
             raise
         print(f"[smoke] (local run, allowed) no COCO draft: {exc}"[:300])
 
-    data = call("GET", f"/api/jobs/{job}/download/pibo")
+    data = call("GET", f"/api/jobs/{job}/download/model")
     here = SCRATCH / "pibo"                 # on the robot: the one file, and detect.py to try it
     here.mkdir(parents=True, exist_ok=True)
-    (here / f"pibo-job{job}.onnx").write_bytes(data)
+    (here / f"job{job}.onnx").write_bytes(data)
     shutil.copy(Path(__file__).resolve().parents[2] / "pibo" / "detect.py", here)
-    print(f"[smoke] Pibo model {len(data) / 1e6:.1f} MB")
+    print(f"[smoke] one-file model {len(data) / 1e6:.1f} MB")
     out = subprocess.run([sys.executable, "-I", "detect.py", str(SCRATCH / "test.jpg"),
                           "--conf", "0"], cwd=here, capture_output=True, text=True,
                          encoding="utf-8", timeout=300)
