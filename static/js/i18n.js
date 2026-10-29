@@ -255,6 +255,10 @@
     "키포인트 찍기 (포즈)": "Place keypoints (pose)",
     "윤곽·키포인트로 학습한 모델은 그 학습에서 맞춘 윤곽·키포인트 모델을 써요. 아니면 키포인트는 COCO 사람 17점이에요.":
       "A model trained on outlines or keypoints uses the outline or keypoint model fitted with it; otherwise keypoints are COCO's 17 body points.",
+    "상자는 고른 ed 모델이, 윤곽은 MobileSAM 마스크 디코더가 배워요. 둘 다 미리 학습된 가중치에서 시작해요.":
+      "The ed model you pick learns the boxes and MobileSAM's mask decoder the outlines; both start from pretrained weights.",
+    "상자는 고른 ed 모델이, 키포인트는 그 모델의 백본에서 시작한 키포인트 모델이 배워요.":
+      "The ed model you pick learns the boxes; a keypoint model started from its backbone learns the keypoints.",
     "상자를 학습한 뒤 윤곽으로 MobileSAM의 마스크 디코더도 맞춰요 (기본 20에폭). 학습 전보다 나빠지지 않아요.":
       "After the boxes, MobileSAM's mask decoder is fitted to the outlines (20 epochs). It never ends worse than it started.",
     "상자를 학습한 뒤 상자 안 키포인트 모델도 같은 에폭만큼 학습해요. 그만큼 시간이 더 걸려요.":
@@ -352,7 +356,9 @@
     [/남은 시간 계산 중/g, "estimating time left"], [/남은 시간 약 ([^·]+?)\s*$/, "~$1 left"],
     [/키포인트 학습/g, "keypoint training"], [/윤곽\(마스크\) 학습/g, "outline (mask) training"],
     [/준비 · 사진 (\d+)\/(\d+) 읽는 중/g, "preparing · reading picture $1/$2"],
-    [/키포인트 AP/g, "keypoint AP"], [/윤곽 mIoU ([\d.]+) \(학습 전 ([\d.]+)\)/g, "outline mIoU $1 (before training $2)"],
+    [/키포인트 AP/g, "keypoint AP"],
+    [/윤곽 학습 건너뜀: MobileSAM 파일이 없어요 \(인터넷에 연결하거나, MobileSAM이 든 오프라인 묶음을 쓰세요\)\. 상자 모델은 그대로 쓸 수 있어요/g,
+     "outlines skipped: MobileSAM's files are missing (connect to the internet, or use an offline bundle with MobileSAM). The box model works as it is"], [/윤곽 mIoU ([\d.]+) \(학습 전 ([\d.]+)\)/g, "outline mIoU $1 (before training $2)"],
     [/에폭 (\d+)\/(\d+)/g, "epoch $1/$2"], [/배치 (\d+)\/(\d+)/g, "batch $1/$2"], [/검증 중/g, "validating"],
     [/프레임 (\d+)\/(\d+)/g, "frame $1/$2"], [/이미지 (\d+)\/(\d+)/g, "image $1/$2"],
     [/상자 (\d+)개/g, "$1 boxes"], [/(\d+)장 미리보기/g, "$1 previews"], [/(\d+)장/g, "$1 images"],

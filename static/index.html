@@ -119,7 +119,7 @@
         </div>
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
           <select class="inp" id="job-model"><option>ed-n</option><option selected>ed-s</option><option>ed-m</option><option>ed-l</option><option>ed-x</option></select>
-          <div class="hint">n 가장 가벼움 · s 기본 · m · l · x 가장 정확</div></div>
+          <div class="hint" id="model-hint">n 가장 가벼움 · s 기본 · m · l · x 가장 정확</div></div>
         <div class="grid2">
           <div><label class="pb-label" for="job-epochs">에폭</label><input class="inp" id="job-epochs" type="number" value="50" min="1" max="10000" step="1" required></div>
           <div><label class="pb-label" for="job-batch">배치</label><input class="inp" id="job-batch" type="number" value="4" min="1" max="1024" step="1" required></div>
@@ -531,10 +531,21 @@ const TRAIN_TASK = {
   segment: "상자를 학습한 뒤 윤곽으로 MobileSAM의 마스크 디코더도 맞춰요 (기본 20에폭). 학습 전보다 나빠지지 않아요.",
   pose: "상자를 학습한 뒤 상자 안 키포인트 모델도 같은 에폭만큼 학습해요. 그만큼 시간이 더 걸려요.",
 };
+// the start model is the same detector for every task: the dataset's labels
+// add the outline or keypoint stage, so the list says what comes with it
+const MODEL_HINT = {
+  segment: "상자는 고른 ed 모델이, 윤곽은 MobileSAM 마스크 디코더가 배워요. 둘 다 미리 학습된 가중치에서 시작해요.",
+  pose: "상자는 고른 ed 모델이, 키포인트는 그 모델의 백본에서 시작한 키포인트 모델이 배워요.",
+};
+const MODEL_ADDS = { segment: "윤곽", pose: "키포인트" };
 function showTrainTask() {
-  const text = TRAIN_TASK[trainTasks[$("job-dataset").value]];
+  const task = trainTasks[$("job-dataset").value];
+  const text = TRAIN_TASK[task];
   $("job-task").hidden = !text;
   $("job-task").textContent = text ? T(text) : "";
+  for (const option of $("job-model").options)
+    option.textContent = MODEL_ADDS[task] ? `${option.value} + ${T(MODEL_ADDS[task])}` : option.value;
+  $("model-hint").textContent = T(MODEL_HINT[task] || "n 가장 가벼움 · s 기본 · m · l · x 가장 정확");
 }
 $("job-dataset").addEventListener("change", showTrainTask);
 // 수업용: the epochs follow the dataset (its size, and whether the backbone

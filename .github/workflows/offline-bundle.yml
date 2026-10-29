@@ -8,17 +8,14 @@ name: offline-bundle
 # Inside: CPython 3.11 (the python.org NuGet package: a full, relocatable
 # install where pip works as usual, unlike the embeddable zip), PyTorch CPU,
 # easydetect and the lab's requirements, the lab itself, and easydetect's
-# cache filled with what labelling, training (ed-n / ed-s), exporting
-# and predicting need. The bundle is then unzipped elsewhere and driven
-# through the classroom path with every route to the internet blocked.
+# cache filled with what labelling, training (ed-n / ed-s, outlines with
+# MobileSAM, keypoints), exporting and predicting need. The bundle is then
+# unzipped elsewhere and driven through the classroom path with every route
+# to the internet blocked.
 
 on:
   workflow_dispatch:
     inputs:
-      extras:
-        description: "Also MobileSAM (outlines) and the pose-s keypoint model"
-        type: boolean
-        default: false
       release:
         description: "Attach the zip to this existing release (a tag, v0.7.7); empty: do not"
         type: string
@@ -111,13 +108,10 @@ jobs:
           Get-ChildItem -Recurse $lab | Select-Object -ExpandProperty FullName
 
       - name: easydetect's cache - everything the classroom path downloads
-        env:
-          EXTRAS: ${{ inputs.extras && '1' || '0' }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $env:EASYDETECT_HOME = Join-Path $env:ROOT "easydetect-cache"
           $script = @'
-          import os
           from easydetect import downloads as d
           from easydetect.nn import EDNet
 
@@ -130,10 +124,10 @@ jobs:
           # the ImageNet backbones training falls back to without a checkpoint
           for variant in ("n", "s"):
               assert EDNet(variant, 2).backbone.imagenet_loaded, variant
-          if os.environ.get("EXTRAS") == "1":
-              d.download_segmenter()        # outlines (MobileSAM)
-              d.download_sam_decoder()      # training on outlines
-              d.download_pose("s")          # keypoints
+          # the lab offers outlines and keypoints too: about 75 MB
+          d.download_segmenter()            # outlines (MobileSAM)
+          d.download_sam_decoder()          # training on outlines
+          d.download_pose("s")              # keypoints
           root = d.cache_dir()
           for f in sorted(root.rglob("*")):
               if f.is_file():
