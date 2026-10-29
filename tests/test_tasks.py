@@ -338,3 +338,13 @@ def test_a_trained_keypoint_run_predicts_keypoints(studio, monkeypatch):
     res = client.post(f"/api/jobs/{job}/predict",
                       files={"image": ("a.jpg", image_bytes(), "image/jpeg")})
     assert res.status_code == 200 and tasks == ["pose"]
+
+
+def test_a_skipped_mask_stage_is_said_on_the_finished_job(tmp_path):
+    """Offline without MobileSAM: the job finishes with its boxes and says why no outlines."""
+    from worker import _stage_scores
+
+    (tmp_path / "segment").mkdir()
+    assert _stage_scores(tmp_path) is None
+    (tmp_path / "segment" / "skipped").write_text("mobile_sam/ is not on the mirror")
+    assert "윤곽 학습 건너뜀" in _stage_scores(tmp_path)

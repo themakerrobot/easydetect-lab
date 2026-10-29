@@ -90,6 +90,9 @@ def _stage_scores(run_dir: Path) -> str | None:
     finished = run_dir / "pose" / "finished"
     if finished.exists():
         parts.append(f"키포인트 AP {float(finished.read_text().strip() or 0):.3f}")
+    if (run_dir / "segment" / "skipped").exists():
+        parts.append("윤곽 학습 건너뜀: MobileSAM 파일이 없어요 (인터넷에 연결하거나, "
+                     "MobileSAM이 든 오프라인 묶음을 쓰세요). 상자 모델은 그대로 쓸 수 있어요")
     results = run_dir / "segment" / "results.csv"
     if results.exists():
         with results.open(encoding="utf-8") as f:

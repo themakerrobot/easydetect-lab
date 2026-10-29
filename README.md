@@ -69,7 +69,8 @@ To use a Python you already have (a conda env, say) instead of `.venv`,
 `easydetect-lab-offline-win64.zip` (attached to each
 [release](https://github.com/themakerrobot/easydetect-lab/releases), built by
 `.github/workflows/offline-bundle.yml`) holds Python 3.11, PyTorch for the
-CPU, easydetect, the lab and the weights training starts from. Unzip it and
+CPU, easydetect, the lab, the weights training starts from, and MobileSAM
+and the keypoint model for outlines and keypoints. Unzip it and
 double-click `start-lab-offline.bat`: nothing is installed and nothing is
 downloaded. On laptops with an Intel GPU, take
 `easydetect-lab-offline-win64-intel-gpu.zip` instead: the same, with
