@@ -181,7 +181,7 @@ Button names below are the English ones.
    It shows the `hf upload` command to run next. The IR and ONNX zips carry the
    same card, written for the runtime inside.
 
-![labelling](labeling.jpg)
+![labelling](labeling-en.jpg)
 
 ## Where things live
 
