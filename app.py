@@ -1788,9 +1788,7 @@ def http_error(_request, exc: HTTPException):
 
 
 def _detections_header(result) -> str:
-    """The boxes as JSON for the X-Detections header. Headers are latin-1, so
-    class names in Korean (or any non-ASCII) go as \\u escapes; JSON.parse in
-    the page reads them back."""
+    """The boxes as ASCII JSON: headers are latin-1."""
     return json.dumps(result.summary(), ensure_ascii=True)
 
 

@@ -341,7 +341,7 @@ def test_a_trained_keypoint_run_predicts_keypoints(studio, monkeypatch):
 
 
 def test_a_skipped_mask_stage_is_said_on_the_finished_job(tmp_path):
-    """Offline without MobileSAM: the job finishes with its boxes and says why no outlines."""
+    """A skipped mask stage shows on the job."""
     from worker import _stage_scores
 
     (tmp_path / "segment").mkdir()

@@ -580,7 +580,7 @@ def test_the_preview_endpoint_refuses_what_it_cannot_read(studio):
 
 
 def test_korean_class_names_survive_the_detections_header(studio, monkeypatch):
-    """Headers are latin-1: a class called 코끼리 once made "try this model" a 500."""
+    """Non-latin-1 class names in the X-Detections header."""
     client, module = studio
     found = [{"name": "코끼리", "class": 0, "confidence": 0.9,
               "box": {"x1": 1, "y1": 2, "x2": 3, "y2": 4}}]

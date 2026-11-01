@@ -351,8 +351,7 @@ def test_detect_py_reads_the_names_and_threshold_inside_a_lone_onnx(tmp_path):
 
 
 def test_a_one_class_set_without_backgrounds_is_warned_about(studio):
-    """A cube model trained on cubes alone called apples cubes: the dataset
-    view says so before training, and how to fix it."""
+    """One class and no background pictures: the dataset view warns."""
     client, _ = studio
     page = client.get("/").text
     assert "used.length === 1 && !s.empty_labels.length && s.boxes" in page
