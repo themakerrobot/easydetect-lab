@@ -118,8 +118,8 @@
           <div class="hint" id="kept" hidden></div>
         </div>
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
-          <select class="inp" id="job-model"><option>ed-n</option><option selected>ed-s</option><option>ed-m</option><option>ed-l</option><option>ed-x</option></select>
-          <div class="hint" id="model-hint">n 가장 가벼움 · s 기본 · m · l · x 가장 정확</div></div>
+          <select class="inp" id="job-model"><option>ed-n</option><option selected>ed-s</option><option>ed-m</option></select>
+          <div class="hint" id="model-hint">n 가장 가벼움 · s 기본 · m 가장 정확 · l·x는 GPU가 있을 때</div></div>
         <div class="grid2">
           <div><label class="pb-label" for="job-epochs">에폭</label><input class="inp" id="job-epochs" type="number" value="50" min="1" max="10000" step="1" required></div>
           <div><label class="pb-label" for="job-batch">배치</label><input class="inp" id="job-batch" type="number" value="4" min="1" max="1024" step="1" required></div>
@@ -510,7 +510,7 @@ document.querySelectorAll(".dropzone input").forEach((input) => {
   input.resetDrop = () => { input.value = ""; update(); };
 });
 
-let smiSeen = false, gpu = null, running = null, runPicked = false, listedAt = 0, listedStatus = null;
+let smiSeen = false, gpu = null, hasGpu = false, running = null, runPicked = false, listedAt = 0, listedStatus = null;
 let jobFilter = "", allJobs = [], allDatasets = [], allModels = [], firstLoad = true, stepsShown = false;
 
 // which model a job used, in words: "best.pt" alone says nothing about which run
@@ -545,7 +545,8 @@ function showTrainTask() {
   $("job-task").textContent = text ? T(text) : "";
   for (const option of $("job-model").options)
     option.textContent = MODEL_ADDS[task] ? `${option.value} + ${T(MODEL_ADDS[task])}` : option.value;
-  $("model-hint").textContent = T(MODEL_HINT[task] || "n 가장 가벼움 · s 기본 · m · l · x 가장 정확");
+  $("model-hint").textContent = T(MODEL_HINT[task] || (hasGpu ? "n 가장 가벼움 · s 기본 · m · l · x 가장 정확"
+    : "n 가장 가벼움 · s 기본 · m 가장 정확 · l·x는 GPU가 있을 때"));
 }
 $("job-dataset").addEventListener("change", showTrainTask);
 // 수업용: the epochs follow the dataset (its size, and whether the backbone
@@ -583,6 +584,7 @@ async function refresh() {
   // a tab in the background still says how far the run is
   document.title = pct ? `${pct.trim()} · easydetect lab` : "easydetect lab";
   $("gpu-warn").hidden = !(smiSeen && !state.gpu);   // the driver sees a card PyTorch cannot use
+  hasGpu = Boolean(state.gpu);
   // a laptop's Intel GPU shares the memory and is far from a desktop card:
   // it keeps the 수업용 batch, preset and epochs, only trained faster
   if (state.gpu && state.gpu.kind !== "xpu" && !gpu) {   // a GPU wants bigger batches
@@ -628,20 +630,25 @@ async function refresh() {
 
   // a finished run is usable straight away — no need to register it first
   const runs = jobs.filter((j) => j.kind === "train" && j.status === "done" && j.run_dir);
-  if (changed("pickers", runs.map((j) => [j.id, j.dataset, j.best_map]), registry, i18n.lang)) {
+  if (changed("pickers", runs.map((j) => [j.id, j.dataset, j.best_map]), registry, i18n.lang, hasGpu)) {
     const trained = runs.map((j) => `<option value="${esc(j.run_dir)}/weights/best.pt">#${j.id} ${esc(j.dataset || "")}`
         + `${j.best_map != null ? ` · mAP ${fmt(j.best_map)}` : ""}</option>`).join("");
     const mine = trained ? `<optgroup label="내 학습 결과">${trained}</optgroup>` : "";
     const named = registry.models.length ? `<optgroup label="등록된 모델">`
       + registry.models.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("") + `</optgroup>` : "";
-    const coco = `<optgroup label="COCO 사전학습 · 80 클래스">`
-      + registry.builtin.map((n) => `<option value="${n}">${n}</option>`).join("") + `</optgroup>`;
+    const cocoOf = (names) => `<optgroup label="COCO 사전학습 · 80 클래스">`
+      + names.map((n) => `<option value="${n}">${n}</option>`).join("") + `</optgroup>`;
+    // l and x train only on a GPU in reasonable time: without one they are not offered
+    const startable = registry.builtin.filter((n) => hasGpu || !["ed-l", "ed-x"].includes(n));
     // training starts from COCO; using a model starts from what you trained
-    for (const [id, html] of [["job-model", coco + named + mine], ["run-model", mine + named + coco]]) {
+    for (const [id, html] of [["job-model", cocoOf(startable) + named + mine],
+                              ["run-model", mine + named + cocoOf(registry.builtin)]]) {
       const was = $(id).value;
       $(id).innerHTML = html;
       if (was && (id !== "run-model" || runPicked)) $(id).value = was;
+      if (!$(id).value) $(id).value = id === "job-model" ? "ed-s" : $(id).options[0]?.value;
     }
+    showTrainTask();
   }
   if (changed("models", registry.models, i18n.lang)) renderModels(registry.models);
   renderJobs();

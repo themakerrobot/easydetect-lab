@@ -74,6 +74,7 @@
     "model.onnx · labels.txt · detect.py — numpy, OpenCV, onnxruntime만으로 돌아요": "model.onnx · labels.txt · detect.py — runs with numpy, OpenCV and onnxruntime alone",
     "모델 파일(.onnx)을 만드는 중이에요. 몇 초 걸려요": "Making the model file (.onnx); a few seconds",
     "시작 모델": "Start from", "n 가장 가벼움 · s 기본 · m · l · x 가장 정확": "n lightest · s default · m · l · x most accurate",
+    "n 가장 가벼움 · s 기본 · m 가장 정확 · l·x는 GPU가 있을 때": "n lightest · s default · m most accurate · l and x with a GPU",
     "비워 두면 easydetect가 정해요.": "Left empty, easydetect decides.",
     "겹친 상자 정리 (IoU)": "Overlapping boxes (IoU)", "끄기": "off",
     "물체 윤곽 칠하기 (세그멘테이션)": "Outline objects (segmentation)",
