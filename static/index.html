@@ -918,7 +918,9 @@ const PRESETS = {
                augment: false, queries: 100, denoising: 30 },
   fast: { model: "ed-s", imgsz: 320, epochs: 30, batch: 8, freeze: "backbone", patience: 10, augment: false,
           queries: "", denoising: "" },
-  balanced: { model: "ed-s", imgsz: 640, epochs: 50, batch: 4, freeze: "backbone", patience: 15, augment: true,
+  // what was ahead of YOLO26s on 19 of RF100's 26 datasets: ed-s, 640 px,
+  // 100 epochs, the backbone trained too (batch 16 on a GPU)
+  balanced: { model: "ed-s", imgsz: 640, epochs: 100, batch: 4, freeze: "", patience: 25, augment: true,
               queries: "", denoising: "" },
   accurate: { model: "ed-s", imgsz: 640, epochs: 150, batch: 2, freeze: "", patience: 30, augment: true,
               queries: "", denoising: "" } };
