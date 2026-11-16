@@ -180,13 +180,19 @@ def _shape_inference_in_memory():
         quant_utils.add_infer_metadata(model)
         return model
 
-    modules = [quant_utils]
-    try:            # the module, not the function of the same name
-        modules.append(importlib.import_module("onnxruntime.quantization.quantize"))
-    except ImportError:
-        pass
+    import sys
+
+    # every quantizer module that took the function by name (quantize,
+    # calibrate, ...), not only the one that defines it
+    for name in ("quantize", "calibrate", "onnx_quantizer", "qdq_quantizer"):
+        try:
+            importlib.import_module(f"onnxruntime.quantization.{name}")
+        except ImportError:
+            pass
+    modules = [m for n, m in list(sys.modules.items())
+               if n.startswith("onnxruntime.quantization") and m is not None]
     saved = [(m, m.load_model_with_shape_infer) for m in modules
-             if hasattr(m, "load_model_with_shape_infer")]
+             if callable(getattr(m, "load_model_with_shape_infer", None))]
     for m, _ in saved:
         m.load_model_with_shape_infer = load_model_with_shape_infer
 
