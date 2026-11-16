@@ -200,11 +200,12 @@ def test_the_pibo_zip_runs_without_easydetect_and_matches_it(studio, tmp_path, m
     assert session.get_inputs()[0].shape == [1, 3, 160, 160]       # the run's input size
     assert session.get_outputs()[1].shape[1] == 100                # the trained query count
 
-    # detect.py against easydetect's own predictions, on the same picture
+    # detect.py against easydetect's own predictions with the same (8-bit) file
     picture = _picture(tmp_path / "scene.jpg")
     from easydetect import Detector
 
-    ours = Detector(str(best), backend="onnxruntime", verbose=False)
+    assert best.exists()
+    ours = Detector(str(here / f"job{job}.onnx"), backend="onnxruntime", verbose=False)
     detect = _load_detect_py(here)
     for conf in (0.0, 0.5):
         theirs = ours.predict(str(picture), conf=conf, verbose=False)[0]
@@ -360,9 +361,9 @@ def test_a_one_class_set_without_backgrounds_is_warned_about(studio):
     assert "is the only class and no picture is a background" in i18n
 
 
-def test_a_run_at_416_reaches_pibo_in_8_bits(tmp_path):
-    """The 파이보용 goal trains at 416, which a Pi runs in 0.5 s only in 8 bits:
-    the Pibo file is ONNX Runtime QDQ, the convolutions only, the stem float."""
+def test_the_pibo_file_is_8_bit(tmp_path):
+    """A Pi runs ed-s a quarter faster in 8 bits: the Pibo file is ONNX Runtime
+    QDQ, the convolutions only, the stem float; without pictures it stays float."""
     pytest.importorskip("onnxruntime")
     import cv2
     import numpy as np
@@ -393,4 +394,6 @@ def test_a_run_at_416_reaches_pibo_in_8_bits(tmp_path):
     assert stem and all(made_by.get(n.input[1]) != "DequantizeLinear" for n in stem)
     assert any(p.key == "easydetect.names" for p in model.metadata_props)
     _, again = pibo_export.export_onnx(weights, tmp_path / "run" / "pibo", 320, data / "data.yaml")
-    assert again["int8"] is False                     # 320 stays float, as before
+    assert again["int8"] is True                      # every size
+    _, alone = pibo_export.export_onnx(weights, tmp_path / "run2" / "pibo", 320)
+    assert alone["int8"] is False                     # no pictures to measure ranges on

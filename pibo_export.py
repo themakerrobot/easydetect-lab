@@ -27,9 +27,10 @@ DEFAULT_IMGSZ = 320
 CONF_STEPS = [round(0.25 + 0.05 * i, 2) for i in range(10)]
 #: Validation pictures looked at for it, at most.
 CONF_IMAGES = 200
-#: From this input size up the file is made 8-bit for Pibo: a Raspberry Pi 4
-#: runs ed-s at 416 in 625 ms in float, 470 ms in 8 bits (COCO -0.009)
-INT8_FROM = 416
+#: The file is made 8-bit for Pibo from this input size up (every size): a
+#: Raspberry Pi 4 runs ed-s about a quarter faster in 8 bits for about 0.01
+#: COCO mAP50-95 (416: 625 -> 470 ms, 0.446 -> 0.437)
+INT8_FROM = 0
 #: Training pictures the 8-bit ranges are measured on, at most.
 INT8_IMAGES = 100
 
