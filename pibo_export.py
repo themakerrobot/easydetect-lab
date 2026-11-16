@@ -142,8 +142,11 @@ def to_int8(onnx: Path, data_yaml: Path | None, imgsz: int) -> bool:
 
     pre = onnx.with_name(onnx.stem + "-pre.onnx")
     out = onnx.with_name(onnx.stem + "-int8.onnx")
+    restore = _shape_inference_in_memory()
     try:
-        quant_pre_process(str(onnx), str(pre), skip_symbolic_shape=True)
+        # no file-based shape inference: on Windows it cannot open a path with
+        # Hangul in it (a lab in 바탕 화면); the quantizer infers shapes in memory
+        quant_pre_process(str(onnx), str(pre), skip_symbolic_shape=True, skip_onnx_shape=True)
         nodes = [n.name for n in onnx_lib.load(str(pre)).graph.node
                  if n.op_type == "Conv" and "stem" not in n.name]
         quantize_static(str(pre), str(out), Reader(), quant_format=QuantFormat.QDQ,
@@ -159,9 +162,38 @@ def to_int8(onnx: Path, data_yaml: Path | None, imgsz: int) -> bool:
         onnx_lib.save(model, str(out))
         out.replace(onnx)
     finally:
+        restore()
         pre.unlink(missing_ok=True)
         out.unlink(missing_ok=True)
     return True
+
+
+def _shape_inference_in_memory():
+    """ONNX Runtime's quantizer infers shapes through onnx's file-based call,
+    which on Windows fails on a path with Hangul in it: swap in the same thing
+    done in memory, for the quantizer's modules. Returns what undoes it."""
+    import onnx as onnx_lib
+    from onnxruntime.quantization import quant_utils
+
+    def load_model_with_shape_infer(model_path):
+        model = onnx_lib.shape_inference.infer_shapes(onnx_lib.load(str(model_path)))
+        quant_utils.add_infer_metadata(model)
+        return model
+
+    modules = [quant_utils]
+    try:            # the module, not the function of the same name
+        modules.append(importlib.import_module("onnxruntime.quantization.quantize"))
+    except ImportError:
+        pass
+    saved = [(m, m.load_model_with_shape_infer) for m in modules
+             if hasattr(m, "load_model_with_shape_infer")]
+    for m, _ in saved:
+        m.load_model_with_shape_infer = load_model_with_shape_infer
+
+    def restore():
+        for m, original in saved:
+            m.load_model_with_shape_infer = original
+    return restore
 
 
 def export_onnx(weights: Path, out_dir: Path, imgsz: int,

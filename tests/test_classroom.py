@@ -372,13 +372,15 @@ def test_the_pibo_file_is_8_bit(tmp_path):
 
     import pibo_export
 
+    tmp_path = tmp_path / "바탕 화면"          # as on a Korean Windows desktop
     data = tmp_path / "ds"
     for split in ("train", "val"):
         (data / "images" / split).mkdir(parents=True)
         (data / "labels" / split).mkdir(parents=True)
         for i in range(3):
-            cv2.imwrite(str(data / "images" / split / f"{i}.jpg"),
-                        np.random.default_rng(i).integers(0, 255, (96, 128, 3), np.uint8))
+            picture = np.random.default_rng(i).integers(0, 255, (96, 128, 3), np.uint8)
+            # imencode + write_bytes: cv2.imwrite cannot write a Hangul path on Windows
+            (data / "images" / split / f"{i}.jpg").write_bytes(cv2.imencode(".jpg", picture)[1])
             (data / "labels" / split / f"{i}.txt").write_text("0 0.5 0.5 0.3 0.3\n")
     (data / "data.yaml").write_text(yaml.safe_dump(
         {"path": str(data), "train": "images/train", "val": "images/val", "names": {0: "cup"}}))
