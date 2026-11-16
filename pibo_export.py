@@ -27,6 +27,11 @@ DEFAULT_IMGSZ = 320
 CONF_STEPS = [round(0.25 + 0.05 * i, 2) for i in range(10)]
 #: Validation pictures looked at for it, at most.
 CONF_IMAGES = 200
+#: From this input size up the file is made 8-bit for Pibo: a Raspberry Pi 4
+#: runs ed-s at 416 in 625 ms in float, 470 ms in 8 bits (COCO -0.009)
+INT8_FROM = 416
+#: Training pictures the 8-bit ranges are measured on, at most.
+INT8_IMAGES = 100
 
 _lock = threading.Lock()   # two clicks at once must not export into one folder together
 
@@ -95,6 +100,69 @@ def pick_conf(onnx: Path, data_yaml: Path | None) -> float | None:
     return best_conf
 
 
+def to_int8(onnx: Path, data_yaml: Path | None, imgsz: int) -> bool:
+    """``onnx`` made 8-bit in place, the way a Pi runs it fastest: ONNX
+    Runtime's own QDQ, the convolutions only (the decoder's matrix products in
+    8 bits lose too much), the backbone's stem in float, ranges at the 99.99th
+    percentile of the training pictures. False (float kept) without pictures
+    or without onnxruntime's quantization tools."""
+    if data_yaml is None or not Path(data_yaml).exists():
+        return False
+    try:
+        import cv2
+        import numpy as np
+        import onnx as onnx_lib
+        from easydetect.data.dataset import DetDataset
+        from easydetect.utils.imageio import imread
+        from onnxruntime.quantization import (
+            CalibrationDataReader,
+            CalibrationMethod,
+            QuantFormat,
+            QuantType,
+            quantize_static,
+        )
+        from onnxruntime.quantization.shape_inference import quant_pre_process
+    except ImportError:
+        return False
+    files = DetDataset(str(data_yaml), "train", imgsz, augment=False).files
+    files = files[::max(1, len(files) // INT8_IMAGES)][:INT8_IMAGES]
+
+    class Reader(CalibrationDataReader):
+        def __init__(self):
+            self.files = iter(files)
+
+        def get_next(self):
+            for f in self.files:
+                img = imread(str(f))
+                if img is not None:
+                    x = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (imgsz, imgsz))
+                    return {"images": (x.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]}
+            return None
+
+    pre = onnx.with_name(onnx.stem + "-pre.onnx")
+    out = onnx.with_name(onnx.stem + "-int8.onnx")
+    try:
+        quant_pre_process(str(onnx), str(pre), skip_symbolic_shape=True)
+        nodes = [n.name for n in onnx_lib.load(str(pre)).graph.node
+                 if n.op_type == "Conv" and "stem" not in n.name]
+        quantize_static(str(pre), str(out), Reader(), quant_format=QuantFormat.QDQ,
+                        op_types_to_quantize=["Conv"], nodes_to_quantize=nodes,
+                        per_channel=True, activation_type=QuantType.QUInt8,
+                        weight_type=QuantType.QInt8,
+                        calibrate_method=CalibrationMethod.Percentile,
+                        extra_options={"CalibPercentile": 99.99})
+        meta = onnx_lib.load(str(onnx)).metadata_props      # the class names travel too
+        model = onnx_lib.load(str(out))
+        del model.metadata_props[:]
+        model.metadata_props.extend(meta)
+        onnx_lib.save(model, str(out))
+        out.replace(onnx)
+    finally:
+        pre.unlink(missing_ok=True)
+        out.unlink(missing_ok=True)
+    return True
+
+
 def export_onnx(weights: Path, out_dir: Path, imgsz: int,
                 data_yaml: Path | None = None) -> tuple[Path, dict]:
     """``model.onnx`` and the class names, exported once per ``best.pt``.
@@ -114,7 +182,9 @@ def export_onnx(weights: Path, out_dir: Path, imgsz: int,
         fresh = (onnx.exists() and info.exists()
                  and onnx.stat().st_mtime_ns >= weights.stat().st_mtime_ns
                  and info.stat().st_mtime_ns >= weights.stat().st_mtime_ns
-                 and json.loads(info.read_text(encoding="utf-8")).get("imgsz") == imgsz)
+                 and json.loads(info.read_text(encoding="utf-8")).get("imgsz") == imgsz
+                 and json.loads(info.read_text(encoding="utf-8")).get("int8_wanted", False)
+                 == (imgsz >= INT8_FROM and data_yaml is not None))
         if fresh and "conf" not in json.loads(info.read_text(encoding="utf-8")):
             fresh = False                     # written before the threshold was kept
         if not fresh:
@@ -126,10 +196,12 @@ def export_onnx(weights: Path, out_dir: Path, imgsz: int,
             queries = int(model.net.decoder.num_queries)
             # the exporter's own sidecar names the file it wrote; ours is model.json
             (out_dir / f"{written.stem}.names.json").unlink(missing_ok=True)
-            conf = pick_conf(written, data_yaml)
+            int8 = imgsz >= INT8_FROM and to_int8(written, data_yaml, imgsz)
+            conf = pick_conf(written, data_yaml)            # on the file Pibo gets
             written.replace(onnx)
             _write_atomic(info, json.dumps({
-                "imgsz": imgsz, "queries": queries,
+                "imgsz": imgsz, "queries": queries, "int8": bool(int8),
+                "int8_wanted": imgsz >= INT8_FROM and data_yaml is not None,
                 "names": [names.get(i, str(i)) for i in range(max(names, default=-1) + 1)],
                 # None: no validation pictures to pick it on, detect.py's 0.5
                 "conf": conf,

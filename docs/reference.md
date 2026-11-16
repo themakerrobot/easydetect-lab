@@ -99,7 +99,7 @@ Button names below are the English ones.
    `best.pt` you can point the auto-labeller at it. On an outline dataset the
    drafts come with outlines; on a keypoint dataset with the keypoints a model
    knows by name — a run trained on the dataset, or COCO's people.
-5. **Train** — a goal (빠르게 / 균형 / 정확하게) or your own model, epochs,
+5. **Train** — a goal (수업용 / 파이보용 / 빠르게 / 균형 / 정확하게) or your own model, epochs,
    batch, backbone freezing, "stop when it stops improving" (patience) and
    zoom/crop augmentation; image size and device under 고급 설정, and there
    too the optimizer: learning rate, the backbone's share of it, warmup epochs,

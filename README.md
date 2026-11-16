@@ -75,6 +75,9 @@ Follow the five steps along the top of the screen.
 3. **Train**: pick the dataset and a goal, then *Start training*.
    - **Classroom (CPU)**: picked by itself when there is no GPU; the epochs
      follow the number of pictures.
+   - **For Pibo**: trains at 416 px; the file sent to Pibo is made 8-bit, so
+     a Raspberry Pi 4 runs it in under 0.5 s and it finds small objects
+     better than a 320 px model. Quick with a GPU.
    - **Fast / Balanced / Accurate**: for a PC with a GPU.
    - The rest is set from the data. The curve and the time left update live;
      afterwards, *Evaluate* shows the accuracy per class and the pictures with

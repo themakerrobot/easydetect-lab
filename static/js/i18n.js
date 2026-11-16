@@ -62,6 +62,9 @@
       "Starts from the COCO weights and fits them to your data. An OpenVINO IR and an ONNX are exported at the end.",
     "상자를 그린 데이터셋이 아직 없어요.": "No dataset has boxes yet.", "데이터셋 추가하기": "Add a dataset",
     "목표": "Goal", "빠르게": "Fast", "균형": "Balanced", "정확하게": "Accurate", "수업용 (CPU)": "Classroom (CPU)",
+    "파이보용": "For Pibo",
+    "파이보(라즈베리파이 4)에서 0.5초 안에 도는 416px로 배워요. 파이보로 보낼 때(ONNX 파일 하나) 8비트로 바꿔서, 320px 모델보다 작은 물체를 더 잘 찾으면서 0.5초 안에 돌아요. GPU가 있으면 금방이고, CPU만 있으면 수업용보다 오래 걸려요.":
+      "Learns at 416 px, the size Pibo (Raspberry Pi 4) runs in under 0.5 s: the file sent to Pibo (one ONNX file) is made 8-bit, so it finds small objects better than a 320 px model and still runs in under 0.5 s. Quick with a GPU; on a CPU alone it takes longer than the classroom goal.",
     "노트북 CPU로 사진 300장을 15분 안에 배우도록 맞췄어요. 300장이면 검증용 20%를 빼고 240장 × 35에폭 = 8,400장을 봐요. 4코어 CPU에서 초당 11~15장이라 9~13분, 에폭마다 하는 검증까지 11~15분이에요. 사진이 적으면 에폭을 늘려요(100장이면 100에폭): 적은 사진은 더 여러 번 봐야 잘 배우고, 걸리는 시간은 비슷해요. 25에폭 동안 나아지지 않으면 일찍 끝나요. 더 느린 노트북이면 에폭을 줄이세요.":
       "Set to learn 300 pictures in under 15 minutes on a laptop CPU: 20% are kept for validation, so 240 × 35 epochs = 8,400 pictures. A 4-core CPU does 11-15 a second, so 9-13 minutes, 11-15 with each epoch's validation. Fewer pictures get more epochs (100 epochs for 100 pictures): a small set needs more passes to learn, and the time stays about the same. It stops early after 25 epochs without improvement. On a slower laptop, lower the epochs.",
     "쿼리 수": "Queries", "디노이징 쿼리": "Denoising queries", "자동 (300)": "auto (300)", "자동 (100)": "auto (100)",

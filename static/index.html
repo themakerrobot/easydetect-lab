@@ -109,12 +109,14 @@
         <div class="field"><div class="pb-label">목표</div>
           <div class="row seg full" id="presets">
             <button class="db" data-preset="classroom">수업용 (CPU)</button>
+            <button class="db" data-preset="pibo">파이보용</button>
             <button class="db" data-preset="fast">빠르게</button>
             <button class="db on" data-preset="balanced" aria-pressed="true">균형</button>
             <button class="db" data-preset="accurate">정확하게</button>
           </div>
           <div class="hint" id="preset-hint"></div>
           <div class="hint" id="preset-note" hidden>노트북 CPU로 사진 300장을 15분 안에 배우도록 맞췄어요. 300장이면 검증용 20%를 빼고 240장 × 35에폭 = 8,400장을 봐요. 4코어 CPU에서 초당 11~15장이라 9~13분, 에폭마다 하는 검증까지 11~15분이에요. 사진이 적으면 에폭을 늘려요(100장이면 100에폭): 적은 사진은 더 여러 번 봐야 잘 배우고, 걸리는 시간은 비슷해요. 25에폭 동안 나아지지 않으면 일찍 끝나요. 더 느린 노트북이면 에폭을 줄이세요.</div>
+          <div class="hint" id="preset-pibo-note" hidden>파이보(라즈베리파이 4)에서 0.5초 안에 도는 416px로 배워요. 파이보로 보낼 때(ONNX 파일 하나) 8비트로 바꿔서, 320px 모델보다 작은 물체를 더 잘 찾으면서 0.5초 안에 돌아요. GPU가 있으면 금방이고, CPU만 있으면 수업용보다 오래 걸려요.</div>
           <div class="hint" id="kept" hidden></div>
         </div>
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
@@ -916,6 +918,10 @@ function classroomEpochs() {
 const PRESETS = {
   classroom: { model: "ed-n", imgsz: 320, epochs: "auto", batch: 8, freeze: "auto", patience: 25,
                augment: false, queries: 100, denoising: 30 },
+  // the size Pibo (Raspberry Pi 4) runs in under 0.5 s once in 8 bits (416:
+  // 625 ms in float, 470 ms in 8 bits; pibo_export.py makes it 8-bit)
+  pibo: { model: "ed-s", imgsz: 416, epochs: 100, batch: 4, freeze: "", patience: 25, augment: true,
+          queries: 100, denoising: "" },
   fast: { model: "ed-s", imgsz: 320, epochs: 30, batch: 8, freeze: "backbone", patience: 10, augment: false,
           queries: "", denoising: "" },
   // what was ahead of YOLO26s on 19 of RF100's 26 datasets: ed-s, 640 px,
@@ -966,6 +972,7 @@ document.querySelectorAll("#presets button").forEach((b) => {
     presetPicked = true;
     press("#presets button", (x) => x === b);
     $("preset-note").hidden = b.dataset.preset !== "classroom";
+    $("preset-pibo-note").hidden = b.dataset.preset !== "pibo";
     const p = PRESETS[b.dataset.preset];
     // the CPU batches, times four on a GPU — 16 GB+ holds them at 640
     for (const [key, id] of Object.entries(PRESET_FIELDS))

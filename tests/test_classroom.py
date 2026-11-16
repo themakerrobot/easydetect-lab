@@ -358,3 +358,39 @@ def test_a_one_class_set_without_backgrounds_is_warned_about(studio):
     assert "하나뿐이고 배경 사진이 없어요" in page
     i18n = client.get("/static/js/i18n.js").text
     assert "is the only class and no picture is a background" in i18n
+
+
+def test_a_run_at_416_reaches_pibo_in_8_bits(tmp_path):
+    """The 파이보용 goal trains at 416, which a Pi runs in 0.5 s only in 8 bits:
+    the Pibo file is ONNX Runtime QDQ, the convolutions only, the stem float."""
+    pytest.importorskip("onnxruntime")
+    import cv2
+    import numpy as np
+    import onnx
+    import yaml
+
+    import pibo_export
+
+    data = tmp_path / "ds"
+    for split in ("train", "val"):
+        (data / "images" / split).mkdir(parents=True)
+        (data / "labels" / split).mkdir(parents=True)
+        for i in range(3):
+            cv2.imwrite(str(data / "images" / split / f"{i}.jpg"),
+                        np.random.default_rng(i).integers(0, 255, (96, 128, 3), np.uint8))
+            (data / "labels" / split / f"{i}.txt").write_text("0 0.5 0.5 0.3 0.3\n")
+    (data / "data.yaml").write_text(yaml.safe_dump(
+        {"path": str(data), "train": "images/train", "val": "images/val", "names": {0: "cup"}}))
+    weights = _tiny_checkpoint(tmp_path / "run" / "weights" / "best.pt", {0: "cup"})
+    onnx_path, meta = pibo_export.export_onnx(weights, tmp_path / "run" / "pibo", 416,
+                                              data / "data.yaml")
+    assert meta["int8"] is True
+    model = onnx.load(str(onnx_path))
+    ops = [n.op_type for n in model.graph.node]
+    assert ops.count("QuantizeLinear") > 10 and "MatMulInteger" not in ops
+    made_by = {o: n.op_type for n in model.graph.node for o in n.output}
+    stem = [n for n in model.graph.node if n.op_type == "Conv" and "stem" in n.name]
+    assert stem and all(made_by.get(n.input[1]) != "DequantizeLinear" for n in stem)
+    assert any(p.key == "easydetect.names" for p in model.metadata_props)
+    _, again = pibo_export.export_onnx(weights, tmp_path / "run" / "pibo", 320, data / "data.yaml")
+    assert again["int8"] is False                     # 320 stays float, as before
