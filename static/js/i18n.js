@@ -14,7 +14,7 @@
     
     ".pt는 학습 시작 모델로도 쓸 수 있어요. 믿을 수 있는 파일만 올리세요.": "A .pt can also be a start model for training. Upload only files you trust.",
     "easydetect hub에서 받은 모델이면, 상업용은 그 데이터셋 조건을 먼저 확인하세요.": "A model from easydetect hub: check its dataset's terms before commercial use.", "{0}클래스": "{0} classes",
-    "COCO 80가지 물체": "COCO's 80 objects", "공개 데이터셋 모델 (hub)": "A model for a public dataset (hub)",
+    "COCO 80가지 물체": "COCO's 80 objects", "인터넷이 되면 hub 이름으로도 돼요": "Online, a hub name works too",
     "받아 둔 파일이면 그 경로": "A file you downloaded: its path", "여기서 학습한 모델": "A model trained here",
     "장치: AUTO · CPU · GPU · NPU": "Device: AUTO · CPU · GPU · NPU", "영상 · 웹캠(0): 한 장씩": "Video · webcam (0): frame by frame",
     "끌어서 그려요 · 상자를 끌면 옮겨요 · 저장은 저절로 돼요": "Drag to draw · drag a box to move it · it saves by itself",
