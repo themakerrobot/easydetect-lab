@@ -217,8 +217,10 @@ jobs:
   # internet (Ubuntu 20.04 or later, x86-64, CPU). Python is a relocatable build
   # (python-build-standalone), OpenCV the headless one (no desktop libraries
   # needed); unpack and run ./start-lab-offline.sh.
+  # built when asked for (Actions -> offline-bundle -> Run workflow), not on
+  # every release: a release gets the Windows zips, as before
   bundle-linux:
-    if: github.event_name != 'workflow_dispatch' || inputs.only != 'windows'
+    if: github.event_name == 'workflow_dispatch' && inputs.only != 'windows'
     runs-on: ubuntu-22.04          # an older glibc than the PCs it is for
     timeout-minutes: 120
     env:
