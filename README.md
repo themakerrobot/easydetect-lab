@@ -114,10 +114,10 @@ starts from the same ed-n … ed-x; the dataset's labels add a stage.
   best result so far is kept.
 - **Updating**: the app with `git pull`, the model package with
   `pip install -U "easydetect[train]"`; the offline bundle by taking the new zip.
-- **License**: the app, the model code and the weights are all Apache-2.0.
-  The data a model learned from keeps its own terms (COCO: CC BY 4.0
-  annotations, pictures under Flickr's terms; your own pictures are yours):
-  keep its credit, and check those before commercial use.
+- **License**: the app, the model code and the weights are all Apache-2.0,
+  free for classes and products alike, and so is a model you train here on
+  your own pictures. Starting from an easydetect hub model (a public dataset's)
+  is the exception: check that dataset's terms before commercial use.
 
 ## More
 
