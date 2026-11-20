@@ -10,7 +10,7 @@ no internet, 100–300 pictures train in 10–15 minutes.
 
 ## Getting started
 
-**A classroom with no internet (Windows)**: download a zip from the
+**A classroom with no internet (Windows or Ubuntu)**: download a zip from the
 [releases](https://github.com/themakerrobot/easydetect-lab/releases), unzip it
 and double-click `start-lab-offline.bat`. Nothing is installed and nothing is
 downloaded.
@@ -19,6 +19,7 @@ downloaded.
 | --- | --- |
 | `easydetect-lab-offline-win64.zip` | any laptop (trains on the CPU) |
 | `easydetect-lab-offline-win64-intel-gpu.zip` | laptops with an Intel GPU (Core Ultra, Arc): training runs on the GPU |
+| `easydetect-lab-offline-linux-x64.tar.gz` | Linux PCs (Ubuntu 20.04 or later, x86-64; trains on the CPU): `tar -xzf` it and run `./start-lab-offline.sh`, then open http://127.0.0.1:8080 |
 
 For teachers (what to prepare, a lesson plan, troubleshooting), in Korean:
 [docs/classroom.md](docs/classroom.md)

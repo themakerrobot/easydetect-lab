@@ -10,7 +10,7 @@
 
 ## 시작하기
 
-**인터넷 없는 교실 (Windows)**: [릴리스](https://github.com/themakerrobot/easydetect-lab/releases)에서
+**인터넷 없는 교실 (Windows, 우분투)**: [릴리스](https://github.com/themakerrobot/easydetect-lab/releases)에서
 zip을 받아 풀고 `start-lab-offline.bat`을 더블클릭합니다. 설치할 것도, 내려받을
 것도 없습니다.
 
@@ -18,6 +18,7 @@ zip을 받아 풀고 `start-lab-offline.bat`을 더블클릭합니다. 설치할
 | --- | --- |
 | `easydetect-lab-offline-win64.zip` | 보통 노트북 (CPU로 학습) |
 | `easydetect-lab-offline-win64-intel-gpu.zip` | 인텔 GPU 노트북 (Core Ultra, Arc): 학습이 GPU에서 돌아요 |
+| `easydetect-lab-offline-linux-x64.tar.gz` | 리눅스 PC (우분투 20.04 이상, x86-64, CPU로 학습): `tar -xzf`로 풀고 `./start-lab-offline.sh` 실행 후 브라우저에서 http://127.0.0.1:8080 |
 
 선생님용 안내(준비물, 수업 순서, 문제 해결): [docs/classroom.md](docs/classroom.md)
 
