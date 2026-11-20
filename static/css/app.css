@@ -16,7 +16,9 @@
   --toast-bg:#233642; --toast-ink:#fff;
   color-scheme:light;
 }
-header{background:var(--panel)}
+/* a full-width bar, as on the hub page: the kit's boxed header made a frame inside the window */
+header{background:var(--panel);margin:0;border:0;border-radius:0;box-shadow:none;
+  border-bottom:2px solid var(--line-d);padding:0 16px}
 #toast,.toast{background:var(--toast-bg);color:var(--toast-ink)}
 /* Korean wraps between words, not inside them */
 body{word-break:keep-all;overflow-wrap:break-word}
