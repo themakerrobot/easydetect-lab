@@ -414,3 +414,9 @@ details.more li{margin:2px 0}
 
 /* a caution said beside what it is about (a hub start model's dataset terms) */
 .hint.warn-note{color:var(--warn);font-weight:600}
+
+/* searching easydetect hub's models for a start model */
+.hub-find{margin-top:8px;padding:10px;border:1px solid var(--line-soft);border-radius:9px;background:var(--panel2)}
+.hub-find .row{gap:6px}
+.hub-find .cls{width:100%;text-align:left;background:var(--panel);font:inherit;color:inherit;padding:6px 10px;margin-top:6px}
+.hub-find .cls .hint{margin-top:3px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

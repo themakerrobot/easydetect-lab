@@ -131,6 +131,11 @@
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
           <select class="inp" id="job-model"><option>ed-n</option><option selected>ed-s</option><option>ed-m</option></select>
           <div class="hint" id="model-hint">n 가장 가벼움 · s 기본 · m 가장 정확 · l·x는 GPU가 있을 때</div>
+          <div class="hub-find" id="hub-find" hidden>
+            <div class="row"><input class="inp" id="hub-q" type="search" placeholder="데이터셋·클래스로 찾기 (helmet, fish…)" autocomplete="off">
+              <button class="db sm" id="hub-close" type="button">닫기</button></div>
+            <div id="hub-list"></div>
+          </div>
           <div class="hint warn-note" id="hub-note" hidden>공개 데이터셋 모델이에요. 상업용이면 그 데이터셋 조건을 확인하세요.</div></div>
         <div class="grid2">
           <div><label class="pb-label" for="job-epochs">에폭</label><input class="inp" id="job-epochs" type="number" value="50" min="1" max="10000" step="1" required></div>
@@ -679,7 +684,8 @@ async function refresh() {
     // l and x train only on a GPU in reasonable time: without one they are not offered
     const startable = registry.builtin.filter((n) => hasGpu || !["ed-l", "ed-x"].includes(n));
     // training starts from COCO; using a model starts from what you trained
-    for (const [id, html] of [["job-model", cocoOf(startable) + hubGroup() + named + mine],
+    startParts = [cocoOf(startable), named + mine];
+    for (const [id, html] of [["job-model", startParts[0] + hubGroup() + startParts[1]],
                               ["run-model", mine + named + cocoOf(registry.builtin)]]) {
       const was = $(id).value;
       $(id).innerHTML = html;
@@ -708,25 +714,88 @@ async function refresh() {
 // easydetect hub (models trained on public datasets) as start models, when this
 // browser can reach Hugging Face; an offline classroom simply does not see them
 const HUB = "https://huggingface.co/leeyunjai/easydetect-hub/resolve/main";
+const HUB_MORE = "hub:?";                     // the list's last line: search them all
+let hubPicked = "", startParts = ["", ""], lastStart = "ed-s";
+const hubWords = (list) => new Set(list.flatMap((c) => String(c).toLowerCase().split(/[^a-z0-9가-힣]+/))
+  .filter((w) => w.length > 2 || (w.length === 2 && /[가-힣]/.test(w))));
 fetch(`${HUB}/index.json`).then((r) => (r.ok ? r.json() : {})).then((index) => {
   const seen = new Map();
   for (const [key, m] of Object.entries(index)) {
     const id = key.split("/")[0];
-    if (!seen.has(id)) seen.set(id, { id, title: (m.title || id).replace(/^Roboflow 100: /, "").split(" (")[0],
-                                      classes: Object.keys(m.classes || {}).length });
+    if (id === "coco" || seen.has(id)) continue;   // COCO's own are at the top already
+    const names = Object.values(m.classes || {}).map(String);
+    seen.set(id, { id, title: (m.title || id).replace(/^Roboflow 100: /, "").split(" (")[0],
+                   names, classes: names.length, words: hubWords(names), category: m.category || "" });
   }
   hubSets = [...seen.values()].sort((a, b) => a.title.localeCompare(b.title));
   delete drawn.pickers;                       // draw the start models again with them
   refresh();
 }).catch(() => {});
+// a hundred and more: the list offers the few whose classes share a word with
+// the dataset being trained, and the rest are found with a search
+function hubSuggested() {
+  const d = allDatasets.find((x) => String(x.id) === $("job-dataset").value);
+  if (!d || !d.classes.length) return [];
+  const mine = hubWords(d.classes);
+  return hubSets.map((h) => ({ h, n: [...h.words].filter((w) => mine.has(w)).length }))
+    .filter((x) => x.n > 0).sort((a, b) => b.n - a.n || a.h.title.localeCompare(b.h.title))
+    .slice(0, 5).map((x) => x.h);
+}
+const hubOption = (h) => `<option value="hub:${esc(h.id)}">${esc(h.title)} · ${T`${h.classes}클래스`}</option>`;
 function hubGroup() {
-  return hubSets.length ? `<optgroup label="${T("공개 데이터셋 모델 (hub · 인터넷)")}">`
-    + hubSets.map((d) => `<option value="hub:${esc(d.id)}">${esc(d.title)} · ${T`${d.classes}클래스`}</option>`).join("")
-    + `</optgroup>` : "";
+  if (!hubSets.length) return "";
+  const shown = hubSuggested();
+  const picked = hubSets.find((h) => `hub:${h.id}` === hubPicked);
+  if (picked && !shown.includes(picked)) shown.unshift(picked);
+  return `<optgroup label="${T("공개 데이터셋 모델 (hub · 인터넷)")}">${shown.map(hubOption).join("")}`
+    + `<option value="${HUB_MORE}">${T`더 찾기… (${hubSets.length}개)`}</option></optgroup>`;
+}
+function drawStartModels() {
+  const was = $("job-model").value;
+  $("job-model").innerHTML = startParts[0] + hubGroup() + startParts[1];
+  $("job-model").value = was && was !== HUB_MORE ? was : lastStart;
+  if (!$("job-model").value) $("job-model").value = "ed-s";
+  showTrainTask();
+  showHubNote();
+}
+function drawHubFind() {
+  const words = $("hub-q").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = (h) => [h.id, h.title, h.category, ...h.names].join(" ").toLowerCase();
+  const first = words.length ? [] : hubSuggested();
+  const found = [...first, ...hubSets.filter((h) => !first.includes(h)
+    && words.every((w) => hay(h).includes(w)))];
+  $("hub-list").innerHTML = found.slice(0, 6).map((h) => `<button type="button" class="cls" data-hub="hub:${esc(h.id)}">
+      <span class="top"><span class="nm">${esc(h.title)}</span><span class="ct">${T`${h.classes}클래스`}</span></span>
+      <span class="hint">${esc(h.names.slice(0, 6).join(", "))}</span></button>`).join("")
+    + (found.length > 6 ? `<div class="hint">${T`${found.length - 6}개 더 있어요. 검색해 보세요.`}</div>` : "")
+    + (found.length ? "" : `<div class="hint">${T("맞는 모델이 없어요.")}</div>`);
 }
 // a model trained on a public dataset carries that dataset's terms: said where it is picked
 function showHubNote() { $("hub-note").hidden = !$("job-model").value.startsWith("hub:"); }
-$("job-model").addEventListener("change", showHubNote);
+$("job-model").addEventListener("change", () => {
+  if ($("job-model").value === HUB_MORE) {
+    $("job-model").value = lastStart;
+    $("hub-find").hidden = false;
+    $("hub-q").value = "";
+    drawHubFind();
+    $("hub-q").focus();
+  } else lastStart = $("job-model").value;
+  showHubNote();
+});
+// what was picked before "search them all", to go back to (a preset may have set it)
+for (const ev of ["focus", "pointerdown"])
+  $("job-model").addEventListener(ev, () => { if ($("job-model").value !== HUB_MORE) lastStart = $("job-model").value; });
+$("hub-q").addEventListener("input", drawHubFind);
+$("hub-close").addEventListener("click", () => { $("hub-find").hidden = true; });
+$("hub-list").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-hub]"); if (!b) return;
+  hubPicked = lastStart = b.dataset.hub;
+  $("hub-find").hidden = true;
+  drawStartModels();
+  $("job-model").value = hubPicked;
+  showHubNote();
+});
+$("job-dataset").addEventListener("change", () => { if (hubSets.length) drawStartModels(); });
 // a hub dataset starts from its checkpoint at the size being trained
 function startModel() {
   const v = $("job-model").value;
