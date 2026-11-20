@@ -114,7 +114,18 @@
             <button class="db" data-preset="accurate">정확하게</button>
           </div>
           <div class="hint" id="preset-hint"></div>
-          <div class="hint" id="preset-note" hidden>노트북 CPU로 사진 300장을 15분 안에 배우도록 맞췄어요. 300장이면 검증용 20%를 빼고 240장 × 35에폭 = 8,400장을 봐요. 4코어 CPU에서 초당 11~15장이라 9~13분, 에폭마다 하는 검증까지 11~15분이에요. 사진이 적으면 에폭을 늘려요(100장이면 100에폭): 적은 사진은 더 여러 번 봐야 잘 배우고, 걸리는 시간은 비슷해요. 25에폭 동안 나아지지 않으면 일찍 끝나요. 더 느린 노트북이면 에폭을 줄이세요.</div>
+          <div class="hint" id="preset-note" hidden>노트북 CPU로 15분이면 끝나요.
+            <details class="more"><summary>어떻게 맞췄나요</summary><ul>
+              <li>사진 300장이 기준이에요.</li>
+              <li>20%는 검증에 쓰고 240장으로 배워요.</li>
+              <li>35에폭이면 8,400장을 봐요.</li>
+              <li>4코어 CPU면 11~15분 걸려요.</li>
+              <li>사진이 적으면 에폭을 늘려요.</li>
+              <li>100장이면 100에폭이에요.</li>
+              <li>그래도 시간은 비슷해요.</li>
+              <li>25에폭 동안 그대로면 일찍 끝나요.</li>
+              <li>느린 노트북이면 에폭을 줄이세요.</li>
+            </ul></details></div>
           <div class="hint" id="kept" hidden></div>
         </div>
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
@@ -403,6 +414,9 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let current = null, stream = null, currentJob = null;
+let paneReady = false;                     // the first list has arrived: tabs may move the wide pane
+let stepArgs = null;                       // what the step bar was last drawn from
+let hubSets = [];                          // easydetect hub's datasets, when online
 
 const api = async (path, options) => {
   const res = await fetch(path, options);
@@ -449,7 +463,8 @@ function writeHash(push = true) {
   if (location.hash === want) return;
   if (push) history.pushState(null, "", want); else history.replaceState(null, "", want);
 }
-function show(next, { push = true } = {}) {
+function show(next, { push = true, follow = true } = {}) {
+  const moved = view !== next;
   view = next;
   document.querySelectorAll("#nav button").forEach((b) => {
     b.classList.toggle("on", b.dataset.view === next);
@@ -461,6 +476,25 @@ function show(next, { push = true } = {}) {
   });
   store.set("view", next);
   writeHash(push);
+  if (stepArgs) renderSteps(...stepArgs);
+  if (moved && follow && paneReady) paneForView(next);
+}
+
+// the wide pane follows the tab: a job of the tab's kind stays open, else the
+// newest one, else what the tab is about (a dataset's statistics, a model's
+// code) or the overview
+const VIEW_KINDS = { data: ["autolabel"], train: ["train", "evaluate"], infer: ["predict"], models: [] };
+function paneForView(v) {
+  const kinds = VIEW_KINDS[v] || [];
+  if (current && kinds.includes(currentJob?.kind)) return;
+  const latest = allJobs.find((j) => kinds.includes(j.kind));
+  if (latest) return select(latest.id, { scroll: false });
+  if (v === "data" && allDatasets.length) {
+    const picked = Number($("job-dataset")?.value) || allDatasets[0].id;
+    return showStats(allDatasets.some((d) => d.id === picked) ? picked : allDatasets[0].id);
+  }
+  if (v === "models" && allModels.length) return showModel(allModels[0]);
+  closeDetail({ push: false });
 }
 document.querySelectorAll("#nav button").forEach((b) => b.onclick = () => show(b.dataset.view));
 document.addEventListener("click", (e) => {
@@ -471,7 +505,7 @@ document.addEventListener("click", (e) => {
 });
 addEventListener("popstate", () => {
   const h = readHash();
-  if (h.view && h.view !== view) show(h.view, { push: false });
+  if (h.view && h.view !== view) show(h.view, { push: false, follow: !h.job });
   if (h.job && h.job !== current) select(h.job, { scroll: false, push: false });
   else if (!h.job && current) closeDetail({ push: false });
 });
@@ -641,7 +675,7 @@ async function refresh() {
     // l and x train only on a GPU in reasonable time: without one they are not offered
     const startable = registry.builtin.filter((n) => hasGpu || !["ed-l", "ed-x"].includes(n));
     // training starts from COCO; using a model starts from what you trained
-    for (const [id, html] of [["job-model", cocoOf(startable) + named + mine],
+    for (const [id, html] of [["job-model", cocoOf(startable) + hubGroup() + named + mine],
                               ["run-model", mine + named + cocoOf(registry.builtin)]]) {
       const was = $(id).value;
       $(id).innerHTML = html;
@@ -658,20 +692,56 @@ async function refresh() {
   // so the wide pane shows a result rather than the same four cards every visit
   if (firstLoad) {
     firstLoad = false;
-    const wanted = opened.job && jobs.some((j) => j.id === opened.job) ? opened.job : jobs[0]?.id;
-    if (wanted && !current) select(wanted, { scroll: false, push: false });
+    paneReady = true;
+    if (opened.job && jobs.some((j) => j.id === opened.job)) {
+      // a job named in the address: on a narrow screen, its result rather than the form
+      if (!current) select(opened.job, { scroll: matchMedia("(max-width:1100px)").matches, push: false });
+    } else paneForView(view);
   }
 }
 
-// how far along you are: done steps turn green, the next one is marked
+// easydetect hub (models trained on public datasets) as start models, when this
+// browser can reach Hugging Face; an offline classroom simply does not see them
+const HUB = "https://huggingface.co/leeyunjai/easydetect-hub/resolve/main";
+fetch(`${HUB}/index.json`).then((r) => (r.ok ? r.json() : {})).then((index) => {
+  const seen = new Map();
+  for (const [key, m] of Object.entries(index)) {
+    const id = key.split("/")[0];
+    if (!seen.has(id)) seen.set(id, { id, title: (m.title || id).replace(/^Roboflow 100: /, "").split(" (")[0],
+                                      classes: Object.keys(m.classes || {}).length });
+  }
+  hubSets = [...seen.values()].sort((a, b) => a.title.localeCompare(b.title));
+  delete drawn.pickers;                       // draw the start models again with them
+  refresh();
+}).catch(() => {});
+function hubGroup() {
+  return hubSets.length ? `<optgroup label="${T("공개 데이터셋 모델 (hub · 인터넷)")}">`
+    + hubSets.map((d) => `<option value="hub:${esc(d.id)}">${esc(d.title)} · ${T`${d.classes}클래스`}</option>`).join("")
+    + `</optgroup>` : "";
+}
+// a hub dataset starts from its checkpoint at the size being trained
+function startModel() {
+  const v = $("job-model").value;
+  if (!v.startsWith("hub:") || v.includes("/")) return v;
+  return `${v}/ed-s-${Number($("job-imgsz").value) <= 320 ? 320 : 640}.pt`;
+}
+
+// how far along you are: done steps turn green with a check, and the step of
+// the tab you are on is marked; what to do next is said on the overview card
 function renderSteps(datasets, jobs, models) {
+  stepArgs = [datasets, jobs, models];
   const finished = (kind) => jobs.some((j) => j.kind === kind && j.status === "done");
   const done = { data: datasets.length > 0, label: datasets.some((d) => d.labelled > 0),
                  train: finished("train"), infer: finished("predict"), use: models.length > 0 };
   const next = Object.keys(done).find((k) => !done[k]);
-  document.querySelectorAll("#steps .stp").forEach((el) => {
-    el.classList.toggle("done", done[el.dataset.step]);
-    el.classList.toggle("on", el.dataset.step === next);
+  const here = view === "data" ? (done.data ? "label" : "data")
+    : { train: "train", infer: "infer", models: "use" }[view];
+  document.querySelectorAll("#steps .stp").forEach((el, i) => {
+    const step = el.dataset.step;
+    el.classList.toggle("done", done[step] && step !== here);
+    el.classList.toggle("on", step === here);
+    el.querySelector(".cir").textContent = done[step] && step !== here ? "✓" : String(i + 1);
+    if (step === here) el.setAttribute("aria-current", "step"); else el.removeAttribute("aria-current");
   });
   // every step done: the bar folds into one line, and can come back
   $("steps").hidden = !next && !stepsShown;
@@ -1030,7 +1100,7 @@ $("job-start").onclick = async () => {
   try {
     const res = await api("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        dataset_id: datasetId, model: $("job-model").value,
+        dataset_id: datasetId, model: startModel(),
         epochs: Number($("job-epochs").value), imgsz: Number($("job-imgsz").value),
         batch: Number($("job-batch").value), freeze: $("job-freeze").value,
         patience: $("job-patience").value === "" ? null : Number($("job-patience").value),
@@ -1071,15 +1141,16 @@ function renderJobs() {
     const meta = j.kind === "train"
       ? `${modelLabel(j.model)} · ${T`${j.epochs}에폭`} · ${j.imgsz}px · ${T`배치 ${j.batch}`}`
       : `${modelLabel(j.model)} · conf ${fmt(j.conf, 2)}`;
-    const extra = [j.best_map != null ? `mAP50-95 ${fmt(j.best_map)}` : "",
-                   j.started && j.finished ? duration(j.finished - j.started) : ""].filter(Boolean).join(" · ");
+    const extra = j.started && j.finished ? duration(j.finished - j.started) : "";
     const line = live || j.status === "failed" ? (j.detail || "") : [meta, extra].filter(Boolean).join(" · ");
+    const score = !live && j.status !== "failed" && j.best_map != null
+      ? `<span class="score" title="mAP50-95"><small>mAP</small>${fmt(j.best_map)}</span>` : "";
     return `
     <button type="button" class="cls job ${j.id === current ? "on" : ""}" data-job="${j.id}"
         ${j.id === current ? 'aria-current="true"' : ""}>
       <span class="top"><span class="nm">#${j.id} ${T(KIND[j.kind] || j.kind)} · ${esc(j.dataset || (j.source ? short(j.source) : ""))}</span>
         <span class="state ${j.status}">${T(STATUS[j.status] || j.status)}</span></span>
-      <span class="sub ${j.status === "failed" ? "err" : ""}"><span>${esc(line)}</span></span>
+      <span class="sub ${j.status === "failed" ? "err" : ""}"><span>${esc(line)}</span>${score}</span>
       ${live ? `<span class="track"><span class="fill" style="display:block;width:${Math.round((j.progress || 0) * 100)}%"></span></span>` : ""}
     </button>`;
   }).join("") || `<div class="empty">이 종류의 작업은 아직 없어요.</div>`;
@@ -1452,7 +1523,8 @@ const hl = (code) => esc(code)
 function pythonSnippet(path, device) {
   return `from easydetect import Detector
 
-model = Detector(r"${path}"${device ? `, device="${device}"` : ""})   # AUTO · CPU · GPU · NPU
+# ${T("장치: AUTO · CPU · GPU · NPU")}
+model = Detector(r"${path}"${device ? `, device="${device}"` : ""})
 results = model("photo.jpg", conf=0.5)
 
 for r in results:
@@ -1460,9 +1532,10 @@ for r in results:
         x1, y1, x2, y2 = map(int, box)
         print(r.names[int(cls)], f"{score:.2f}", x1, y1, x2, y2)
 
-r.save("result.jpg")                       # ${T("상자를 그린 이미지")}
+# ${T("상자를 그린 이미지")}
+r.save("result.jpg")
 
-# ${T("영상 · 웹캠(0) · RTSP: 한 프레임씩 받기")}
+# ${T("영상 · 웹캠(0): 한 장씩")}
 for r in model.predict("clip.mp4", stream=True):
     print(len(r.boxes), "objects")`;
 }
@@ -1548,10 +1621,16 @@ const general = () => `pip install easydetect
 
 from easydetect import Detector
 
-model = Detector("ed-s")        # ${T("처음 한 번 가중치를 받아요 (COCO 80 클래스)")}
+# ${T("COCO 80가지 물체")}
+model = Detector("ed-s")
 model("photo.jpg", conf=0.5)[0].save("result.jpg")
 
-# ${T("학습한 모델은 그 경로를 그대로 넣어요")}
+# ${T("공개 데이터셋 모델 (hub)")}
+model = Detector("hub:taco/ed-s-640")
+# ${T("받아 둔 파일이면 그 경로")}
+model = Detector("ed-s-640.onnx")
+
+# ${T("여기서 학습한 모델")}
 model = Detector(r"runs/job3/openvino/best.xml")`;
 function renderGeneral() {
   $("code-general").dataset.raw = general();

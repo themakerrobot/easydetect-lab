@@ -1970,10 +1970,16 @@ def _resolve_model(name: str) -> str:
         row = db.one("SELECT * FROM models WHERE name = ?", (text,))
     if row is not None:
         return row["path"]
-    from easydetect.downloads import is_model_name
+    from easydetect import downloads
 
-    if not is_model_name(text):
-        _allowed_path(Path(text), what="model")
+    if downloads.is_model_name(text):
+        return text
+    # a model of easydetect hub (hub:<dataset>/<model>[.pt]): fetched from that
+    # one repository by easydetect, so it is no path anyone could plant
+    if getattr(downloads, "is_hub_name", None) and downloads.is_hub_name(text):
+        downloads.hub_parts(text)                 # a malformed name is refused here
+        return text
+    _allowed_path(Path(text), what="model")
     return text
 
 

@@ -88,15 +88,35 @@
     </div>
     <div class="stage"><canvas id="canvas"></canvas></div>
     <div class="keys">
-      끌어서 그려요 · 상자 안을 끌면 옮겨요 · 모서리를 끌면 크기가 바뀌어요 ·
-      <kbd>1</kbd>–<kbd>9</kbd> 클래스 · <kbd>Del</kbd> 지우기 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 되돌리기 ·
-      <kbd>←</kbd> <kbd>→</kbd> 넘기기 · <kbd>N</kbd> 상자 없는 다음 이미지 · <kbd>C</kbd> 이전 상자 복사 · 휠 확대 ·
-      <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> 확대·축소·맞춤 · <kbd>L</kbd> 이름표 숨기기 ·
-      <kbd>Space</kbd>+끌기로 화면 이동 · 저장은 저절로 돼요
-      <div data-for="segment"><kbd>P</kbd> 윤곽 그리기: 클릭으로 점 · 첫 점이나 <kbd>Enter</kbd>로 닫기 · <kbd>Esc</kbd> 취소 ·
-        <kbd>S</kbd> AI 윤곽 · 점을 끌어 고치기 · 선을 더블클릭하면 점 추가 · 점 우클릭은 지우기</div>
-      <div data-for="pose">상자를 고르고 클릭으로 키포인트를 차례로 찍어요 · <kbd>Shift</kbd>+클릭은 가려진 점 ·
-        <kbd>Tab</kbd> 다음 점 · 점을 끌어 옮기기 · 점 우클릭: 가려짐 → 지우기 · <kbd>Esc</kbd> 선택 해제</div>
+      <span>끌어서 그려요 · 상자를 끌면 옮겨요 · 저장은 저절로 돼요</span>
+      <details class="keyhelp" id="keyhelp"><summary class="db sm" title="단축키 (?)">? 단축키</summary>
+        <div class="keygrid">
+          <span><kbd>1</kbd>–<kbd>9</kbd></span><span>클래스 고르기</span>
+          <span><kbd>Del</kbd></span><span>고른 상자 지우기</span>
+          <span><kbd>Ctrl</kbd>+<kbd>Z</kbd></span><span>되돌리기</span>
+          <span><kbd>←</kbd> <kbd>→</kbd></span><span>이전 · 다음 이미지</span>
+          <span><kbd>N</kbd></span><span>상자 없는 다음 이미지</span>
+          <span><kbd>C</kbd></span><span>이전 상자 복사</span>
+          <span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd></span><span>확대 · 축소 · 맞춤 (휠도 돼요)</span>
+          <span><kbd>Space</kbd>+끌기</span><span>화면 옮기기</span>
+          <span><kbd>L</kbd></span><span>이름표 숨기기</span>
+          <span><kbd>?</kbd></span><span>이 표 열고 닫기</span>
+        </div>
+        <div class="keygrid" data-for="segment">
+          <span><kbd>P</kbd></span><span>윤곽 그리기 (클릭으로 점)</span>
+          <span><kbd>Enter</kbd></span><span>윤곽 닫기 (첫 점을 눌러도 돼요)</span>
+          <span><kbd>S</kbd></span><span>AI 윤곽</span>
+          <span><kbd>Esc</kbd></span><span>그리기 취소</span>
+          <span>더블클릭 · 우클릭</span><span>점 추가 · 점 지우기</span>
+        </div>
+        <div class="keygrid" data-for="pose">
+          <span>클릭</span><span>상자를 고르고 점을 차례로 찍기</span>
+          <span><kbd>Shift</kbd>+클릭</span><span>가려진 점</span>
+          <span><kbd>Tab</kbd></span><span>다음 점</span>
+          <span>우클릭</span><span>가려짐 → 지우기</span>
+          <span><kbd>Esc</kbd></span><span>선택 풀기</span>
+        </div>
+      </details>
     </div>
   </section>
 </main>
@@ -605,8 +625,8 @@ function draw() {
   ctx.drawImage(img, 0, 0);
   const s = scale() || 1;
   const lw = Math.max(1, 2 * s);
-  const tagH = 18 * s, tagPad = 5 * s;
-  ctx.lineWidth = lw; ctx.font = `600 ${12 * s}px ${fontFamily()}`; ctx.textBaseline = "middle";
+  const tagH = 22 * s, tagPad = 6 * s;
+  ctx.lineWidth = lw; ctx.font = `700 ${14 * s}px ${fontFamily()}`; ctx.textBaseline = "middle";
   const skeleton = dataset?.keypoints?.skeleton || [];
   // a crosshair under the pointer while placing a box: where its corner will land
   if (hover && !action && tool === "box" && !(task() === "pose" && selected >= 0)) {
@@ -659,7 +679,7 @@ function draw() {
     }
     if (!showTags && !on) return;
     const text = (dataset.classes[b.cls] ?? b.cls) + (b.conf ? ` ${b.conf}` : "");
-    ctx.font = `600 ${12 * s}px ${fontFamily()}`;
+    ctx.font = `700 ${14 * s}px ${fontFamily()}`;
     const tw = ctx.measureText(text).width + tagPad * 2;
     // above the box; inside it when there is no room or a placed point would be covered
     const covers = (ty) => (b.kpts || []).some((k) => placed(k) && px(k)[0] >= x - 4 * s && px(k)[0] <= x + tw + 4 * s
@@ -686,7 +706,7 @@ function draw() {
   // which keypoint the next click places, beside the pointer
   if (task() === "pose" && selected >= 0 && hover && !action && kptNames().length) {
     const label = kptNames()[kp];
-    ctx.font = `600 ${12 * s}px ${fontFamily()}`;
+    ctx.font = `700 ${14 * s}px ${fontFamily()}`;
     const tw = ctx.measureText(label).width + tagPad * 2;
     ctx.fillStyle = KCOLORS[kp % KCOLORS.length];
     ctx.fillRect(hover.x + 10 * s, hover.y + 10 * s, tw, tagH);
@@ -1018,6 +1038,7 @@ function onKey(e) {
   }
   else if (key === "c" && !e.ctrlKey && !e.metaKey) copyPrevious();
   else if (key === "n" && !e.ctrlKey && !e.metaKey) nextUnlabelled();
+  else if (e.key === "?") { $("keyhelp").open = !$("keyhelp").open; }
   else if (key === "l" && !e.ctrlKey && !e.metaKey) { showTags = !showTags; draw(); notify(showTags ? T("이름표를 보여요") : T("이름표를 숨겨요 (L)")); }
   else if ((e.key === "+" || e.key === "=") && !e.ctrlKey) zoomBy(1.25);
   else if (e.key === "-" && !e.ctrlKey) zoomBy(1 / 1.25);
