@@ -20,11 +20,6 @@ on:
         description: "Attach the zip to this existing release (a tag, v0.7.7); empty: do not"
         type: string
         default: ""
-      only:
-        description: "Build only these: all, windows or linux"
-        type: choice
-        options: [all, windows, linux]
-        default: all
   release:
     types: [published]
 
@@ -40,7 +35,6 @@ env:
 
 jobs:
   bundle:
-    if: github.event_name != 'workflow_dispatch' || inputs.only != 'linux'
     runs-on: windows-latest
     timeout-minutes: 120
     strategy:
@@ -212,125 +206,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name || inputs.release }}
         run: gh release upload "$env:TAG" $env:ZIP --clobber --repo "${{ github.repository }}"
-
-  # easydetect-lab-offline-linux-x64.tar.gz: the same for a Linux PC with no
-  # internet (Ubuntu 20.04 or later, x86-64, CPU). Python is a relocatable build
-  # (python-build-standalone), OpenCV the headless one (no desktop libraries
-  # needed); unpack and run ./start-lab-offline.sh.
-  # built when asked for (Actions -> offline-bundle -> Run workflow), not on
-  # every release: a release gets the Windows zips, as before
-  bundle-linux:
-    if: github.event_name == 'workflow_dispatch' && inputs.only != 'windows'
-    runs-on: ubuntu-22.04          # an older glibc than the PCs it is for
-    timeout-minutes: 120
-    env:
-      NAME: easydetect-lab-offline
-      TGZ: easydetect-lab-offline-linux-x64.tar.gz
-      PBS_TAG: "20241016"          # python-build-standalone release (CPython 3.11)
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Python 3.11 (python-build-standalone, relocatable)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          root="$RUNNER_TEMP/build/$NAME"
-          mkdir -p "$root"
-          asset=$(gh api "repos/astral-sh/python-build-standalone/releases/tags/$PBS_TAG" \
-                    --jq '.assets[].name' \
-                  | grep -E '^cpython-3\.11\.[0-9]+\+[0-9]+-x86_64-unknown-linux-gnu-install_only\.tar\.gz$' \
-                  | head -1)
-          echo "python: $asset"
-          curl -sSLf "https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_TAG/$asset" \
-            | tar -xz -C "$root"
-          py="$root/python/bin/python3"
-          "$py" -m pip install --upgrade pip
-          "$py" -c "import sys; print(sys.version); print(sys.prefix)"
-          echo "ROOT=$root" >> "$GITHUB_ENV"
-          echo "PY=$py" >> "$GITHUB_ENV"
-
-      - name: PyTorch (cpu), easydetect and the lab's requirements
-        env:
-          PIP_NO_CACHE_DIR: "1"
-        run: |
-          set -euo pipefail
-          "$PY" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          "$PY" -m pip install -r requirements.txt
-          # the headless OpenCV: the desktop one needs libGL, which a server lacks
-          cv=$("$PY" -c "import importlib.metadata as m; print(m.version('opencv-python'))")
-          "$PY" -m pip uninstall -y opencv-python openvino-telemetry
-          "$PY" -m pip install "opencv-python-headless==$cv"
-          "$PY" -m pip list
-          "$PY" -c "import torch, torchvision, easydetect, fastapi, uvicorn, openvino, onnxruntime, cv2, scipy, onnx; print('torch', torch.__version__); print('easydetect', easydetect.__version__)"
-
-      - name: The lab
-        run: |
-          set -euo pipefail
-          lab="$ROOT/lab"
-          git ls-files | grep -Ev '^(tests/|\.github/|offline/|\.git|start-lab\.bat$|PLAN\.md$|pyproject\.toml$)' \
-            | while read -r f; do mkdir -p "$lab/$(dirname "$f")"; cp "$f" "$lab/$f"; done
-          cp offline/start-lab-offline.sh "$ROOT/start-lab-offline.sh"
-          chmod +x "$ROOT/start-lab-offline.sh"
-          find "$lab" -type f | sort
-
-      - name: easydetect's cache - everything the classroom path downloads
-        run: |
-          set -euo pipefail
-          EASYDETECT_HOME="$ROOT/easydetect-cache" "$PY" .github/scripts/fill_cache.py
-          find "$ROOT/easydetect-cache" -name '*.part' -delete
-
-      - name: Trim what never runs offline
-        run: |
-          sp="$ROOT/python/lib/python3.11/site-packages"
-          rm -rf "$sp/torch/include" "$ROOT/python/lib/python3.11/test"
-          find "$ROOT/lab" -type d -name __pycache__ -prune -exec rm -rf {} +
-
-      - name: Pack it
-        run: |
-          set -euo pipefail
-          tar -C "$(dirname "$ROOT")" -czf "$GITHUB_WORKSPACE/$TGZ" "$NAME"
-          size=$(stat -c %s "$TGZ")
-          if [ "$size" -ge $((2*1024*1024*1024)) ]; then
-            echo "$TGZ is $((size/1024/1024)) MB, over the 2 GiB a release file may be"; exit 1; fi
-          sp="$ROOT/python/lib/python3.11/site-packages"
-          {
-            echo "tar.gz:           $((size/1024/1024)) MB"
-            echo "unpacked:         $(du -sm "$ROOT" | cut -f1) MB"
-            echo "  torch:          $(du -sm "$sp/torch" | cut -f1) MB"
-            echo "  openvino:       $(du -sm "$sp/openvino" | cut -f1) MB"
-            echo "  weights cache:  $(du -sm "$ROOT/easydetect-cache" | cut -f1) MB"
-          } | tee report.txt
-          { echo "## Linux offline bundle size"; echo '```'; cat report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Test the bundle offline - unpacked somewhere new, the network blocked
-        run: |
-          set -euo pipefail
-          where="$RUNNER_TEMP/바탕 화면"
-          mkdir -p "$where"
-          tar -xzf "$TGZ" -C "$where"
-          bundle="$where/$NAME"
-          export EASYDETECT_ASSETS_URL="http://127.0.0.1:9" HF_HUB_OFFLINE=1
-          export HTTP_PROXY="http://127.0.0.1:9" HTTPS_PROXY="http://127.0.0.1:9"
-          export http_proxy="http://127.0.0.1:9" https_proxy="http://127.0.0.1:9"
-          export NO_PROXY="127.0.0.1,localhost" no_proxy="127.0.0.1,localhost"
-          unset EASYDETECT_HOME
-          (cd "$bundle" && ./start-lab-offline.sh --no-browser --https-port 0 > "$RUNNER_TEMP/lab.log" 2>&1) &
-          trap 'tail -n 60 "$RUNNER_TEMP/lab.log"; pkill -f "$bundle/lab/run.py" || true' EXIT
-          "$bundle/python/bin/python3" -X utf8 .github/scripts/offline_smoke.py \
-            http://127.0.0.1:8080 "$RUNNER_TEMP/smoke"
-          test -f "$bundle/data/lab.db" || { echo "the lab did not keep its data inside the bundle"; exit 1; }
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.TGZ }}
-          path: ${{ env.TGZ }}
-          compression-level: 0
-          retention-days: 14
-
-      - name: Attach to the release
-        if: github.event_name == 'release' || inputs.release != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name || inputs.release }}
-        run: gh release upload "$TAG" "$TGZ" --clobber --repo "${{ github.repository }}"
