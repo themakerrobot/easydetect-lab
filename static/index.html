@@ -130,7 +130,8 @@
         </div>
         <div class="field"><label class="pb-label" for="job-model">시작 모델</label>
           <select class="inp" id="job-model"><option>ed-n</option><option selected>ed-s</option><option>ed-m</option></select>
-          <div class="hint" id="model-hint">n 가장 가벼움 · s 기본 · m 가장 정확 · l·x는 GPU가 있을 때</div></div>
+          <div class="hint" id="model-hint">n 가장 가벼움 · s 기본 · m 가장 정확 · l·x는 GPU가 있을 때</div>
+          <div class="hint warn-note" id="hub-note" hidden>공개 데이터셋 모델이에요. 상업용이면 그 데이터셋 조건을 확인하세요.</div></div>
         <div class="grid2">
           <div><label class="pb-label" for="job-epochs">에폭</label><input class="inp" id="job-epochs" type="number" value="50" min="1" max="10000" step="1" required></div>
           <div><label class="pb-label" for="job-batch">배치</label><input class="inp" id="job-batch" type="number" value="4" min="1" max="1024" step="1" required></div>
@@ -577,8 +578,11 @@ function showTrainTask() {
   const text = TRAIN_TASK[task];
   $("job-task").hidden = !text;
   $("job-task").textContent = text ? T(text) : "";
-  for (const option of $("job-model").options)
-    option.textContent = MODEL_ADDS[task] ? `${option.value} + ${T(MODEL_ADDS[task])}` : option.value;
+  // each option keeps its own name (a hub dataset's, a trained run's) and says what is added
+  for (const option of $("job-model").options) {
+    const base = (option.dataset.label ??= option.textContent);
+    option.textContent = MODEL_ADDS[task] ? `${base} + ${T(MODEL_ADDS[task])}` : base;
+  }
   $("model-hint").textContent = T(MODEL_HINT[task] || (hasGpu ? "n 가장 가벼움 · s 기본 · m · l · x 가장 정확"
     : "n 가장 가벼움 · s 기본 · m 가장 정확 · l·x는 GPU가 있을 때"));
 }
@@ -683,6 +687,7 @@ async function refresh() {
       if (!$(id).value) $(id).value = id === "job-model" ? "ed-s" : $(id).options[0]?.value;
     }
     showTrainTask();
+    showHubNote();
   }
   if (changed("models", registry.models, i18n.lang)) renderModels(registry.models);
   renderJobs();
@@ -719,6 +724,9 @@ function hubGroup() {
     + hubSets.map((d) => `<option value="hub:${esc(d.id)}">${esc(d.title)} · ${T`${d.classes}클래스`}</option>`).join("")
     + `</optgroup>` : "";
 }
+// a model trained on a public dataset carries that dataset's terms: said where it is picked
+function showHubNote() { $("hub-note").hidden = !$("job-model").value.startsWith("hub:"); }
+$("job-model").addEventListener("change", showHubNote);
 // a hub dataset starts from its checkpoint at the size being trained
 function startModel() {
   const v = $("job-model").value;

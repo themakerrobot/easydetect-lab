@@ -411,3 +411,6 @@ details.more li{margin:2px 0}
 .job .sub > span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .job .score{flex-shrink:0;font-weight:700;color:var(--acc-ink);font-variant-numeric:tabular-nums}
 .job .score small{font-weight:500;color:var(--ink3);margin-right:3px}
+
+/* a caution said beside what it is about (a hub start model's dataset terms) */
+.hint.warn-note{color:var(--warn);font-weight:600}

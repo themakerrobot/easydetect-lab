@@ -11,7 +11,8 @@
     // header, steps, panels
     "데이터셋": "Datasets", "학습": "Train", "추론": "Predict", "모델": "Models",
     "노트북 CPU로 15분이면 끝나요.": "About 15 minutes on a laptop CPU.",
-    "공개 데이터셋 모델 (hub · 인터넷)": "Public-dataset models (hub · online)", "{0}클래스": "{0} classes",
+    "공개 데이터셋 모델 (hub · 인터넷)": "Public-dataset models (hub · online)",
+    "공개 데이터셋 모델이에요. 상업용이면 그 데이터셋 조건을 확인하세요.": "A model trained on a public dataset: check that dataset's terms before commercial use.", "{0}클래스": "{0} classes",
     "COCO 80가지 물체": "COCO's 80 objects", "공개 데이터셋 모델 (hub)": "A model for a public dataset (hub)",
     "받아 둔 파일이면 그 경로": "A file you downloaded: its path", "여기서 학습한 모델": "A model trained here",
     "장치: AUTO · CPU · GPU · NPU": "Device: AUTO · CPU · GPU · NPU", "영상 · 웹캠(0): 한 장씩": "Video · webcam (0): frame by frame",
