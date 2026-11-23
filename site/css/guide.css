@@ -1,0 +1,48 @@
+/* easydetect lab guide — on the hub's styles (css/hub.css), the same kit tokens */
+.intro .shot{display:flex;align-items:center;min-width:0}
+.intro .shot img{width:100%;border-radius:8px;border:1px solid var(--line-soft);display:block}
+.block{margin-top:12px;padding:24px 30px}
+.block h3{font-size:19px;font-weight:800;color:var(--ink);margin-bottom:8px}
+.block > .lead{margin-bottom:14px}
+.steps{list-style:none;counter-reset:step;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:6px 0 18px}
+.steps li{counter-increment:step;border:1px solid var(--line-soft);border-radius:10px;padding:12px 14px;background:var(--panel2);
+  display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink2);line-height:1.6}
+.steps li b{font-size:14.5px;color:var(--ink);display:flex;gap:8px;align-items:center}
+.steps li b::before{content:counter(step);flex:none;width:22px;height:22px;border-radius:50%;background:var(--acc);color:#fff;
+  font-size:12px;display:grid;place-items:center}
+.two{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:24px;align-items:start}
+.two figure{margin:0}
+.two img{width:100%;border-radius:8px;border:1px solid var(--line-soft);display:block}
+.two figcaption{font-size:12px;color:var(--ink3);margin-top:6px}
+.keys{border-collapse:collapse;width:100%;font-size:13.5px;margin-top:4px}
+.keys td{padding:7px 8px;border-bottom:1px solid var(--line-soft);color:var(--ink2)}
+.keys td:first-child{white-space:nowrap;color:var(--ink);width:1%}
+kbd{font-family:var(--mono);font-size:11.5px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
+  padding:1px 5px;background:var(--panel)}
+.facts4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.facts4 div{border:1px solid var(--line-soft);border-radius:10px;padding:12px 14px;background:var(--panel2);display:flex;flex-direction:column;gap:5px}
+.facts4 b{font-size:16px;color:var(--ink)}
+.facts4 span{font-size:13px;color:var(--ink2);line-height:1.6}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.card2{border:1px solid var(--line-soft);border-radius:10px;padding:14px 16px;background:var(--panel2);min-width:0;
+  display:flex;flex-direction:column;gap:8px}
+.card2 .pb-label{font-size:12.5px;margin:0}
+.small{font-size:13.5px;color:var(--ink2);line-height:1.7}
+ol.small{padding-left:20px}
+.small code,.zips code{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line-soft);
+  border-radius:4px;padding:0 4px}
+.zips{border-collapse:collapse;font-size:13px;width:100%}
+.zips td{padding:6px 4px;border-top:1px solid var(--line-soft);color:var(--ink2);word-break:break-all}
+.card2 .code{margin-top:0}
+.card2 .code pre{font-size:12px;overflow-x:auto}
+.more .row{flex-wrap:wrap;gap:8px}
+.more .db{padding:8px 14px;font-size:13.5px}
+@media (max-width:900px){
+  .steps{grid-template-columns:1fr 1fr}
+  .two{grid-template-columns:1fr}
+  .facts4{grid-template-columns:1fr 1fr}
+  .block{padding:18px}
+}
+@media (max-width:700px){
+  .steps,.facts4{grid-template-columns:1fr}
+}

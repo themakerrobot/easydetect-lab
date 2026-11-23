@@ -1,6 +1,6 @@
 # easydetect lab
 
-[English](README.md) · **한국어**
+[English](README.md) · **한국어** · [가이드 페이지](https://themakerrobot.github.io/easydetect-lab/)
 
 내 사진으로 물체 인식 모델을 만드는 앱입니다. 브라우저 하나에서 사진 올리기 →
 상자 그리기 → 학습 → 시험 → 내보내기까지 합니다. 인터넷 없는 교실의

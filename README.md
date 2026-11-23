@@ -1,6 +1,6 @@
 # easydetect lab
 
-**English** · [한국어](README.ko.md)
+**English** · [한국어](README.ko.md) · [Guide](https://themakerrobot.github.io/easydetect-lab/)
 
 Make an object detector from your own pictures, in a browser: add pictures →
 draw boxes → train → try it → take it away. On a classroom laptop's CPU with

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>easydetect lab</title>
+<meta name="description" content="Make an object detector from your own pictures, in a browser, on a classroom laptop without the internet.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231F5F7A'/%3E%3Crect x='7' y='10' width='18' height='14' rx='2.5' fill='none' stroke='white' stroke-width='2.4'/%3E%3Crect x='7' y='6' width='10' height='5' rx='1.5' fill='white'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="css/themaker-ui.css">
+<link rel="stylesheet" href="css/hub.css">
+<link rel="stylesheet" href="css/guide.css">
+</head>
+<body>
+<header>
+  <h1><a href="#"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="currentColor"/><rect x="7" y="10" width="18" height="14" rx="2.5" fill="none" stroke="white" stroke-width="2.4"/><rect x="7" y="6" width="10" height="5" rx="1.5" fill="white"/><circle cx="16" cy="17" r="2.2" fill="white"/></svg>easydetect lab</a></h1>
+  <nav>
+    <a class="navlink" href="#how" data-t="navHow">쓰는 순서</a>
+    <a class="navlink" href="#install" data-t="navInstall">설치</a>
+    <a class="navlink ext-link" href="https://github.com/themakerrobot/easydetect-lab/releases/latest" target="_blank" rel="noopener"><span data-t="navRel">릴리스 노트</span> <span class="ext">↗</span></a>
+    <a class="navlink ext-link" href="https://themakerrobot.github.io/easydetect/" target="_blank" rel="noopener"><span data-t="navHub">모델 허브</span> <span class="ext">↗</span></a>
+  </nav>
+  <span class="grow"></span>
+  <button type="button" class="lang-toggle" id="lang">EN</button>
+</header>
+
+<div class="page">
+  <section class="pan intro">
+    <div class="side">
+      <h2 data-t-html="title"></h2>
+      <p class="lead" data-t="lead"></p>
+      <div class="row">
+        <a class="db go" href="https://github.com/themakerrobot/easydetect-lab/releases/latest" target="_blank" rel="noopener" data-t="ctaGet">Windows용 내려받기</a>
+        <a class="db" href="#install" data-t="ctaInstall">설치 방법</a>
+      </div>
+      <p class="hint lic" data-t="licShort"></p>
+    </div>
+    <div class="shot"><img id="shotMain" alt="" src="img/lab-ko.jpg"></div>
+  </section>
+
+  <section class="pan block" id="how">
+    <h3 data-t="howTitle">쓰는 순서</h3>
+    <p class="lead" data-t="howLead"></p>
+    <ol class="steps">
+      <li><b data-t="s1">데이터 올리기</b><span data-t="s1d"></span></li>
+      <li><b data-t="s2">상자 그리기</b><span data-t="s2d"></span></li>
+      <li><b data-t="s3">학습</b><span data-t="s3d"></span></li>
+      <li><b data-t="s4">시험</b><span data-t="s4d"></span></li>
+      <li><b data-t="s5">모델 쓰기</b><span data-t="s5d"></span></li>
+    </ol>
+    <div class="two">
+      <figure><img id="shotLabel" alt="" src="img/labeling-ko.jpg"><figcaption data-t="capLabel">상자 그리기 화면</figcaption></figure>
+      <div>
+        <div class="pb-label" data-t="keysTitle">단축키</div>
+        <table class="keys">
+          <tr><td><kbd>1</kbd>~<kbd>9</kbd></td><td data-t="k1">클래스 바꾸기</td></tr>
+          <tr><td><kbd>C</kbd></td><td data-t="k2">이전 사진의 상자 복사</td></tr>
+          <tr><td><kbd>Del</kbd> · <kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td data-t="k3">지우기 · 되돌리기</td></tr>
+          <tr><td><kbd>S</kbd> · <kbd>P</kbd></td><td data-t="k4">윤곽 따기 · 점 찍어 그리기</td></tr>
+          <tr><td data-t="k5k">휠 · Space+끌기</td><td data-t="k5">확대 · 이동</td></tr>
+        </table>
+        <p class="hint" data-t="kindsNote"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="pan block" id="need">
+    <h3 data-t="needTitle">필요한 것</h3>
+    <div class="facts4">
+      <div><b data-t="n1">Windows 10 · 11</b><span data-t="n1d"></span></div>
+      <div><b data-t="n2">메모리 8 GB</b><span data-t="n2d"></span></div>
+      <div><b data-t="n3">디스크 3 GB</b><span data-t="n3d"></span></div>
+      <div><b data-t="n4">인터넷 없이</b><span data-t="n4d"></span></div>
+    </div>
+    <p class="hint" data-t="gpuNote"></p>
+  </section>
+
+  <section class="pan block" id="install">
+    <h3 data-t="instTitle">설치</h3>
+    <div class="cards">
+      <div class="card2">
+        <div class="pb-label" data-t="i1t">인터넷 없는 교실 (Windows)</div>
+        <ol class="small">
+          <li data-t-html="i1a"></li><li data-t="i1b"></li><li data-t-html="i1c"></li><li data-t="i1d"></li>
+        </ol>
+        <table class="zips">
+          <tr><td><code>easydetect-lab-offline-win64.zip</code></td><td data-t="z1">보통 노트북 (CPU로 학습)</td></tr>
+          <tr><td><code>…-win64-intel-gpu.zip</code></td><td data-t="z2">인텔 GPU 노트북 (Core Ultra, Arc)</td></tr>
+        </table>
+      </div>
+      <div class="card2">
+        <div class="pb-label" data-t="i2t">인터넷 되는 Windows PC</div>
+        <p class="small" data-t-html="i2"></p>
+        <div class="pb-label" data-t="i3t">우분투</div>
+        <div class="code"><pre>sudo apt install -y python3-venv git
+git clone https://github.com/themakerrobot/easydetect-lab
+cd easydetect-lab
+python3 -m venv .venv
+.venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python run.py        # http://127.0.0.1:8080</pre></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pan block" id="use">
+    <h3 data-t="useTitle">만든 모델 쓰기</h3>
+    <div class="cards">
+      <div class="card2"><div class="pb-label">ONNX</div><p class="small" data-t="u1"></p></div>
+      <div class="card2"><div class="pb-label">OpenVINO</div><p class="small" data-t="u2"></p></div>
+      <div class="card2"><div class="pb-label" data-t="u3t">허브 모델에서 시작</div><p class="small" data-t="u3"></p></div>
+    </div>
+    <p class="hint" data-t="licLong"></p>
+  </section>
+
+  <section class="pan block more">
+    <h3 data-t="moreTitle">더 보기</h3>
+    <div class="row">
+      <a class="db" href="https://github.com/themakerrobot/easydetect-lab/blob/main/docs/classroom.md" target="_blank" rel="noopener"><span data-t="m1">선생님용 안내</span> ↗</a>
+      <a class="db" href="https://github.com/themakerrobot/easydetect-lab/blob/main/docs/pibo-integration.md" target="_blank" rel="noopener"><span data-t="m2">파이보 · 라즈베리파이에서 쓰기</span> ↗</a>
+      <a class="db" href="https://github.com/themakerrobot/easydetect-lab/blob/main/docs/reference.md" target="_blank" rel="noopener"><span data-t="m3">기능 전체 설명 (영어)</span> ↗</a>
+      <a class="db" href="https://github.com/themakerrobot/easydetect-lab/releases" target="_blank" rel="noopener"><span data-t="m4">지난 릴리스</span> ↗</a>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <span data-t="foot"></span>
+  <span><a href="https://github.com/themakerrobot/easydetect-lab" target="_blank" rel="noopener">GitHub</a> ·
+    <a href="https://themakerrobot.github.io/easydetect/" target="_blank" rel="noopener">easydetect hub</a></span>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const T = {
+  en: {
+    navHow: "How it works", navInstall: "Install", navRel: "Release notes", navHub: "Model hub",
+    title: "Make an <em>object detector</em> from your own pictures.",
+    lead: "Upload pictures, draw boxes, train, test and export, all in one browser. On a classroom laptop's CPU without the internet, 100–300 pictures train in 10–15 minutes.",
+    ctaGet: "Download for Windows", ctaInstall: "How to install",
+    licShort: "Apache-2.0. A model trained on your own pictures is yours to use, products included.",
+    howTitle: "How it works", howLead: "Follow the five steps at the top of the screen.",
+    s1: "Upload", s1d: "Pictures, a video (frames taken at an interval), a zip or a folder on this PC. YOLO zips from Roboflow come in with their labels.",
+    s2: "Draw boxes", s2d: "Drag to draw a box; class names can be in any language. Auto-label draws them first for objects COCO knows: you only fix them.",
+    s3: "Train", s3d: "Pick the dataset and press Train. Without a GPU it picks the classroom setting by itself and sets the epochs from the picture count.",
+    s4: "Test", s4d: "Try a picture, a folder, a video or the webcam straight away, with per-class scores and pictures of what it got right and wrong.",
+    s5: "Use the model", s5d: "One .onnx file with the class names inside, OpenVINO for Intel CPU · GPU · NPU, or best.pt, with code to run it.",
+    capLabel: "Drawing boxes", keysTitle: "Shortcuts",
+    k1: "Change class", k2: "Copy the previous picture's boxes", k3: "Delete · undo", k4: "Outline with AI · draw with points", k5k: "Wheel · Space+drag", k5: "Zoom · pan",
+    kindsNote: "Outlines (segmentation) and keypoints (pose) are labelled the same way: pick the label kind at the top left.",
+    needTitle: "What you need",
+    n1: "Windows 10 · 11", n1d: "64-bit laptop. No graphics card needed: it trains on the CPU.",
+    n2: "8 GB memory", n2d: "With 4 GB training may stall or be very slow.",
+    n3: "3 GB disk", n3d: "The unzipped folder is 1.5–2 GB; each training adds about 100 MB.",
+    n4: "No internet", n4d: "Only to download the zip, which can go round on a USB stick. Chrome or Edge.",
+    gpuNote: "A GPU is optional: the Intel GPU zip trains on Core Ultra and Arc graphics; with an NVIDIA card, install PyTorch for CUDA once and it is used by itself.",
+    instTitle: "Install",
+    i1t: "Classroom without the internet (Windows)",
+    i1a: "Download the zip from the <a href=\"https://github.com/themakerrobot/easydetect-lab/releases/latest\" target=\"_blank\" rel=\"noopener\">latest release</a>.",
+    i1b: "Unzip it all to a short path such as C:\\easydetect-lab\\ (not inside the zip).",
+    i1c: "Double-click <code>start-lab-offline.bat</code>: the lab opens in the browser.",
+    i1d: "Close the black window to stop it. Datasets and models stay in its data folder.",
+    z1: "An ordinary laptop (trains on the CPU)", z2: "Intel GPU laptops (Core Ultra, Arc)",
+    i2t: "Windows PC with the internet",
+    i2: "Get this repository and double-click <code>start-lab.bat</code>: it installs once, a few minutes, then opens the browser. Python 3.10–3.13 (3.12 recommended), installed with <i>Add python.exe to PATH</i>.",
+    i3t: "Ubuntu",
+    useTitle: "Using the model you made",
+    u1: "One file with the class names and threshold inside. onnxruntime runs it on Pibo, a Raspberry Pi or any PC (about 0.16 s a picture on a Raspberry Pi 4B).",
+    u2: "The fastest on an Intel CPU, GPU or NPU.",
+    u3t: "Starting from a hub model", u3: "Upload a .pt from the easydetect hub to start from it: training needs fewer pictures. For commercial use, check that dataset's terms.",
+    licLong: "The app, the model code and the starting weights are Apache-2.0: free in lessons and products. A model trained on your own pictures is yours; a hub model follows its dataset's terms.",
+    moreTitle: "More", m1: "Teacher's guide", m2: "On Pibo and Raspberry Pi", m3: "Full reference", m4: "Past releases",
+    foot: "easydetect lab, by TheMakerRobot. Apache-2.0.",
+  },
+  ko: {
+    navHow: "쓰는 순서", navInstall: "설치", navRel: "릴리스 노트", navHub: "모델 허브",
+    title: "내 사진으로 <em>물체 인식 모델</em>을 만들어요.",
+    lead: "사진 올리기, 상자 그리기, 학습, 시험, 내보내기까지 브라우저 하나에서 해요. 인터넷 없는 교실의 노트북 CPU에서도 사진 100~300장을 10~15분 안에 학습해요.",
+    ctaGet: "Windows용 내려받기", ctaInstall: "설치 방법",
+    licShort: "Apache-2.0이에요. 내 사진으로 만든 모델은 제품에도 자유롭게 써요.",
+    howTitle: "쓰는 순서", howLead: "화면 위쪽의 다섯 단계를 따라가면 돼요.",
+    s1: "데이터 올리기", s1d: "사진 여러 장, 영상(일정 간격으로 프레임을 뽑아요), zip, 이 PC의 폴더를 올려요. Roboflow에서 받은 YOLO zip은 라벨째 들어가요.",
+    s2: "상자 그리기", s2d: "마우스로 끌어서 상자를 그려요. 클래스 이름은 한글도 돼요. 자동 라벨을 누르면 COCO가 아는 물체는 먼저 그려 주고, 고치기만 하면 돼요.",
+    s3: "학습", s3d: "데이터셋을 고르고 학습을 눌러요. GPU가 없으면 수업용 설정을 스스로 고르고, 에폭도 사진 수에 맞춰 정해요.",
+    s4: "시험", s4d: "사진, 폴더, 영상, 웹캠으로 바로 시험해요. 클래스별 점수와 맞힌 것·틀린 것을 겹친 사진도 볼 수 있어요.",
+    s5: "모델 쓰기", s5d: "클래스 이름이 든 .onnx 파일 하나, 인텔 CPU·GPU·NPU용 OpenVINO, best.pt를 내려받고, 바로 쓰는 코드도 나와요.",
+    capLabel: "상자 그리기 화면", keysTitle: "단축키",
+    k1: "클래스 바꾸기", k2: "이전 사진의 상자 복사", k3: "지우기 · 되돌리기", k4: "AI로 윤곽 따기 · 점 찍어 그리기", k5k: "휠 · Space+끌기", k5: "확대 · 이동",
+    kindsNote: "윤곽(세그멘테이션)과 키포인트(자세)도 같은 방식으로 그려요. 왼쪽 위 라벨 종류에서 골라요.",
+    needTitle: "필요한 것",
+    n1: "Windows 10 · 11", n1d: "64비트 노트북. 그래픽카드는 없어도 돼요(CPU로 학습).",
+    n2: "메모리 8 GB", n2d: "4 GB에서는 학습이 멈추거나 매우 느릴 수 있어요.",
+    n3: "디스크 3 GB", n3d: "압축을 푼 폴더가 1.5~2 GB, 학습할 때마다 100 MB쯤 쌓여요.",
+    n4: "인터넷 없이", n4d: "zip을 받을 때만 필요해요. USB로 나눠 줘도 돼요. 브라우저는 Chrome이나 Edge.",
+    gpuNote: "GPU는 있으면 좋아요. 인텔 GPU용 zip은 Core Ultra·Arc 그래픽에서 학습하고, NVIDIA는 CUDA용 PyTorch를 한 번 깔면 알아서 써요.",
+    instTitle: "설치",
+    i1t: "인터넷 없는 교실 (Windows)",
+    i1a: "<a href=\"https://github.com/themakerrobot/easydetect-lab/releases/latest\" target=\"_blank\" rel=\"noopener\">최신 릴리스</a>에서 zip을 받아요.",
+    i1b: "C:\\easydetect-lab\\ 처럼 짧은 경로에 전부 압축을 풀어요(zip 안에서 바로 실행하면 안 돼요).",
+    i1c: "<code>start-lab-offline.bat</code>을 더블클릭하면 브라우저에 lab이 열려요.",
+    i1d: "검은 창을 닫으면 꺼져요. 데이터셋과 모델은 data 폴더에 남아요.",
+    z1: "보통 노트북 (CPU로 학습)", z2: "인텔 GPU 노트북 (Core Ultra, Arc)",
+    i2t: "인터넷 되는 Windows PC",
+    i2: "이 저장소를 받아 <code>start-lab.bat</code>을 더블클릭해요. 처음 한 번 몇 분 설치하고 브라우저가 열려요. Python 3.10~3.13(3.12 권장)을 <i>Add python.exe to PATH</i>로 설치해 두세요.",
+    i3t: "우분투",
+    useTitle: "만든 모델 쓰기",
+    u1: "클래스 이름과 기준 점수가 든 파일 하나예요. onnxruntime만 있으면 파이보·라즈베리파이·PC 어디서든 돌아가요(라즈베리파이 4B에서 한 장 약 0.16초).",
+    u2: "인텔 CPU·GPU·NPU에서 가장 빨라요.",
+    u3t: "허브 모델에서 시작", u3: "easydetect 허브의 .pt를 올려 시작 모델로 쓸 수 있어요. 사진이 적어도 잘 배워요. 상업용은 그 데이터셋 조건을 먼저 확인하세요.",
+    licLong: "앱, 모델 코드, 시작 가중치는 Apache-2.0이에요. 수업과 제품에 자유롭게 써요. 내 사진으로 만든 모델은 내 것이고, 허브 모델은 그 데이터셋 조건을 따라요.",
+    moreTitle: "더 보기", m1: "선생님용 안내", m2: "파이보 · 라즈베리파이에서 쓰기", m3: "기능 전체 설명 (영어)", m4: "지난 릴리스",
+    foot: "easydetect lab · TheMakerRobot · Apache-2.0",
+  },
+};
+let lang = (() => { try { return localStorage.getItem("lab.lang"); } catch { return null; } })()
+  || ((navigator.language || "").toLowerCase().startsWith("ko") ? "ko" : "en");
+const t = (k) => (T[lang] && T[lang][k]) ?? T.en[k] ?? k;
+function applyLang() {
+  document.documentElement.lang = lang;
+  $("lang").textContent = lang === "ko" ? "EN" : "한국어";
+  document.querySelectorAll("[data-t]").forEach((e) => { e.textContent = t(e.dataset.t); });
+  document.querySelectorAll("[data-t-html]").forEach((e) => { e.innerHTML = t(e.dataset.tHtml); });
+  $("shotMain").src = `img/lab-${lang}.jpg`;
+  $("shotLabel").src = `img/labeling-${lang}.jpg`;
+}
+$("lang").addEventListener("click", () => { lang = lang === "ko" ? "en" : "ko"; try { localStorage.setItem("lab.lang", lang); } catch {} applyLang(); });
+applyLang();
+</script>
+</body>
+</html>
