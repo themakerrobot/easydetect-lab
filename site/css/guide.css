@@ -46,3 +46,6 @@ ol.small{padding-left:20px}
 @media (max-width:700px){
   .steps,.facts4{grid-template-columns:1fr}
 }
+
+/* two in-page tabs here: the name gives way a little sooner on phones */
+@media (max-width:480px){header h1 .brand{display:none}}
