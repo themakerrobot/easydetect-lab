@@ -153,7 +153,7 @@ def test_a_model_given_as_a_path_must_be_inside_the_lab(studio, tmp_path, monkey
     assert module._resolve_model("theirs") == str(planted)   # registered on purpose
     # a model of easydetect hub comes from that one repository: no path to plant
     assert module._resolve_model("hub:taco/ed-s-640.pt") == "hub:taco/ed-s-640.pt"
-    with pytest.raises(Exception):
+    with pytest.raises(FileNotFoundError):        # easydetect's ModelNotFoundError
         module._resolve_model("hub:../../etc/passwd")
 
 
