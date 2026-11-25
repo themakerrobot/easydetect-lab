@@ -14,8 +14,8 @@ for name in ("ed-n", "ed-s"):
 # the ImageNet backbones training falls back to without a checkpoint
 for variant in ("n", "s"):
     assert EDNet(variant, 2).backbone.imagenet_loaded, variant
-# the lab offers outlines and keypoints too: about 75 MB
-d.download_segmenter()            # outlines (MobileSAM)
+# the lab offers outlines and keypoints too (MobileSAM's encoder is inside easydetect)
+d.download_segmenter()            # outlines (MobileSAM's decoder)
 d.download_sam_decoder()          # training on outlines
 d.download_pose("s")              # keypoints
 root = d.cache_dir()
