@@ -1,6 +1,6 @@
 # easydetect lab — reference
 
-What the [README](../README.md) leaves out: every feature in detail, the
+What the [README](../README.en.md) leaves out: every feature in detail, the
 HTTP API, where files go, security, and notes for running it from source.
 [PLAN.md](../PLAN.md) is what the lab is meant to become, and what is missing today.
 
